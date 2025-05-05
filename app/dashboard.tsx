@@ -1,12 +1,40 @@
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, FlatList } from 'react-native';
+
+type Context = {
+  id: number;
+  display_name: string;
+  slug: string;
+  task_count: number;
+};
 
 export default function Dashboard() {
+  const [contexts, setContexts] = useState<Context[]>([]);
+
+  useEffect(() => {
+    fetch('https://veemee.onrender.com/api/contexts', {
+      headers: { 'x-private-key': 'Wwy4Hu33Xs7ob4MVjQ2kB-yW2NGRmsWk' },
+    })
+      .then((res) => res.json())
+      .then((data) => setContexts(data.contexts || []))
+      .catch((err) => console.error('Error fetching contexts:', err));
+  }, []);
+
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Your Dashboard</Text>
-      <View style={styles.contextBox}><Text style={styles.contextText}>Work</Text></View>
-      <View style={styles.contextBox}><Text style={styles.contextText}>Music</Text></View>
-      <View style={styles.contextBox}><Text style={styles.contextText}>Home</Text></View>
+      <FlatList
+        data={contexts}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => (
+          <View style={styles.contextBox}>
+            <Text style={styles.contextText}>
+              {item.display_name} ({item.task_count} tasks)
+            </Text>
+          </View>
+        )}
+        ListEmptyComponent={<Text>No contexts found.</Text>}
+      />
     </View>
   );
 }
