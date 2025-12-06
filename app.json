@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.jonno10.veemeeapp",
+      "bundleIdentifier": "com.interorbis.veemeeapp",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -21,7 +21,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.jonno10.veemeeapp"
+      "package": "com.interorbis.veemeeapp"
     },
     "web": {
       "bundler": "metro",
