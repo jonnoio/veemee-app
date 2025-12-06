@@ -3,6 +3,11 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
+
+useEffect(() => {
+  console.log("🧭 Landed on /auth/confirm");
+}, []);
+
 export default function ConfirmPage() {
   const router = useRouter();
   const { token: rawToken } = useLocalSearchParams();
