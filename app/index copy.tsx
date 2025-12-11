@@ -6,12 +6,11 @@ import {
   Button,
   KeyboardAvoidingView,
   Platform,
-  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
-  View,
+  View
 } from 'react-native';
 import { useAuth } from '../lib/useAuth';
 
@@ -38,16 +37,16 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-  const checkServer = async () => {
-    try {
-      const res = await fetch('https://veemee.onrender.com/api/ping');
-      setServerStatus(res.ok ? 'up' : 'down');
-    } catch {
-      setServerStatus('down');
-    }
-  };
+    const checkServer = async () => {
+      try {
+        const res = await fetch('https://veemee.onrender.com/api/ping');
+        setServerStatus(res.ok ? 'up' : 'down');
+      } catch {
+        setServerStatus('down');
+      }
+    };
 
-  checkServer();
+    checkServer();
     const interval = setInterval(checkServer, 30000); // every 30 seconds
     return () => clearInterval(interval);
   }, []);
@@ -135,7 +134,11 @@ export default function HomeScreen() {
                 value={email}
                 onChangeText={setEmail}
               />
-              <TouchableOpacity style={styles.button} onPress={handleSend} disabled={sendStatus === 'sending'}>
+              <TouchableOpacity
+                style={styles.button}
+                onPress={handleSend}
+                disabled={sendStatus === 'sending'}
+              >
                 <Text style={styles.buttonText}>
                   {sendStatus === 'sending' ? 'Sending…' : 'Send Magic Link'}
                 </Text>
@@ -150,7 +153,7 @@ export default function HomeScreen() {
                   onPress={() =>
                     router.push({
                       pathname: '/auth/confirm',
-                      params: { token: 'IndlYkBqb25jb2xsaW5zLmluZm8i.aTn2Sw.IX6QNfDBmQQJRY-yfF-ob5n5Wuc' },
+                      params: { token: 'TEST-TOKEN-123' },
                     })
                   }
                 />
@@ -187,79 +190,3 @@ export default function HomeScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  circle: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    backgroundColor: '#000',
-    marginBottom: 30,
-  },
-  message: {
-    fontSize: 18,
-    marginBottom: 20,
-  },
-  input: {
-    width: '100%',
-    padding: 14,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 10,
-    marginBottom: 12,
-  },
-  button: {
-    backgroundColor: '#333',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 10,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-  },
-  success: {
-    marginTop: 20,
-    color: 'green',
-    fontSize: 16,
-  },
-  error: {
-    marginTop: 20,
-    color: 'red',
-    fontSize: 16,
-  },
-    statusContainer: {
-    position: 'absolute',
-    bottom: 20,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
-  },
-  statusText: {
-    fontSize: 14,
-    color: '#333',
-  },
-});
