@@ -1,6 +1,6 @@
+import { Stack, useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
 import { Text } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
 import { useAuth } from '../../lib/useAuth';
 
 export default function AppLayout() {
@@ -25,6 +25,7 @@ export default function AppLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="dashboard" />
       <Stack.Screen name="tasks" />
+      <Stack.Screen name="actions" />
     </Stack>
   );
 }

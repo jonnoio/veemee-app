@@ -1,12 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
-import { useRouter } from 'expo-router';
-import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Stack, useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { useAuth } from '../lib/useAuth';
 import { logout } from '../lib/auth'; // adjust path
+import { useAuth } from '../lib/useAuth';
 
 type Persona = {
   id: number;
@@ -23,8 +22,24 @@ export default function Dashboard() {
   const [personas, setPersonas] = useState<Persona[]>([]);
 
   const handleLogout = async () => {
-    await logout();            // remove JWT
-    router.replace('/');       // send back to landing/login screen
+    await logout(); // remove JWT
+    router.replace('/'); // send back to landing/login screen
+  };
+
+  const handleViewTasks = (personaId: number) => {
+    router.push({
+      pathname: '/tasks',
+      params: { personaId: personaId.toString() },
+    } as any);
+  };
+
+  const handleEditPersona = (personaId: number) => {
+    // ✅ CHANGE THIS if your persona edit route differs
+    // e.g. '/personas/[personaId]' or '/persona_edit' etc.
+    router.push({
+      pathname: '/persona/[personaId]',
+      params: { personaId: personaId.toString() },
+    } as any);
   };
 
   useEffect(() => {
@@ -36,15 +51,14 @@ export default function Dashboard() {
     const fetchPersonas = async () => {
       try {
         const token = await SecureStore.getItemAsync('veemee-jwt');
-        console.log("📦 JWT used for fetch:", token);
+        console.log('📦 JWT used for fetch:', token);
+
         const res = await fetch('https://veemee.onrender.com/api/personas', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         });
 
         const text = await res.text();
-        console.log('🧾 Raw response:', text); // this will show if it's HTML
+        console.log('🧾 Raw response:', text); // shows HTML if misrouted
 
         const data = JSON.parse(text);
         console.log('✅ Parsed JSON:', data);
@@ -82,25 +96,36 @@ export default function Dashboard() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
         <Text style={styles.heading}>Dashboard</Text>
+
         <FlatList
           contentContainerStyle={styles.listContainer}
           data={personas}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.personaBox}
-              onPress={() => router.push(`/tasks?personaId=${item.id}`)}
-            >
-              <Text style={styles.personaText}>
-                {item.display_name} ({item.task_count} tasks)
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.row}>
+              {/* Main (tap to edit persona) */}
+              <TouchableOpacity style={styles.main} onPress={() => handleEditPersona(item.id)}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {item.display_name}
+                </Text>
+                <Text style={styles.meta}>{item.task_count} tasks</Text>
+              </TouchableOpacity>
+
+              {/* Right icon (go to tasks) */}
+              <View style={styles.rightIcons}>
+                <TouchableOpacity onPress={() => handleViewTasks(item.id)} style={styles.iconBtn}>
+                  <Ionicons name="list-outline" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+            </View>
           )}
           ListEmptyComponent={<Text>Loading personas...</Text>}
         />
+
         <TouchableOpacity style={styles.backButton} onPress={() => router.push('/')}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
+
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={24} color="#fff" />
         </TouchableOpacity>
@@ -112,21 +137,33 @@ export default function Dashboard() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f4f8', paddingTop: 60 },
   heading: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  personaBox: {
-    backgroundColor: 'white',
-    padding: 20,
-    marginVertical: 10,
-    borderRadius: 12,
-    width: '90%',
+
+  // NEW: consistent row styling (matches tasks/actions vibe)
+  listContainer: { paddingHorizontal: 16, paddingBottom: 120 },
+
+  row: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'white',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginVertical: 8,
+    borderRadius: 12,
+
     shadowColor: '#000',
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 6,
     elevation: 3,
   },
-  personaText: { fontSize: 20, color: '#333' },
-  listContainer: { alignItems: 'center' },
+
+  main: { flex: 1 },
+  title: { fontSize: 18, color: '#333', fontWeight: '600' },
+  meta: { fontSize: 12, color: '#777', marginTop: 4 },
+
+  rightIcons: { flexDirection: 'row', alignItems: 'center' },
+  iconBtn: { padding: 8 },
+
   backButton: {
     position: 'absolute',
     bottom: 30,

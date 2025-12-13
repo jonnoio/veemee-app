@@ -113,11 +113,14 @@ export default function TasksScreen() {
   // View actions for this task
   const handleViewActions = (taskId: number) => {
     router.push({
-      pathname: '/actions/[taskId]',
-      params: { taskId: taskId.toString(), personaId: personaId?.toString() },
+      pathname: '/actions',
+      params: {
+        taskId: taskId.toString(),
+        personaId: personaId?.toString(),
+      },
     } as any);
   };
-
+  
   const filteredTasks = hideCompleted
     ? tasks.filter((task) => task.status !== 'done')
     : tasks;
