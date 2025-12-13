@@ -17,7 +17,7 @@ type Task = {
   id: number;
   persona_id: number;
   task_text: string;
-  status: 'pending' | 'done' | string;
+  status: 'todo' | 'done' | string;
   due_date: string | null;
   category: string | null;
 };
@@ -96,7 +96,7 @@ export default function TaskEditScreen() {
 
       const payload = {
         task_text: taskText.trim(),
-        status: isDone ? 'done' : 'pending',
+        status: isDone ? 'done' : 'todo',
         due_date: dueDate.trim() ? dueDate.trim() : null,
       };
 

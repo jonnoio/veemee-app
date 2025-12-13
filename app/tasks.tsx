@@ -47,7 +47,7 @@ export default function TasksScreen() {
     setTasks((prevTasks) =>
       prevTasks.map((task) =>
         task.id === taskId
-          ? { ...task, status: task.status === 'done' ? 'pending' : 'done' }
+          ? { ...task, status: task.status === 'done' ? 'todo' : 'done' }
           : task
       )
     );
@@ -65,7 +65,7 @@ export default function TasksScreen() {
       setTasks((prevTasks) =>
         prevTasks.map((task) =>
           task.id === taskId
-            ? { ...task, status: task.status === 'done' ? 'pending' : 'done' }
+            ? { ...task, status: task.status === 'done' ? 'todo' : 'done' }
             : task
         )
       );

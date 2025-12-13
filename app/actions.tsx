@@ -17,7 +17,7 @@ type Action = {
   id: number;
   task_id: number;
   name: string;
-  status: 'pending' | 'done' | string;
+  status: 'todo' | 'done' | string;
   due_date: string | null;
   estimated_minutes: number | null;
 };
@@ -85,11 +85,17 @@ export default function ActionsScreen() {
         body: JSON.stringify({ name }),
       });
 
+      const text = await res.text();
+      console.log('POST add action status:', res.status);
+      console.log('POST add action body:', text);
+
       if (!res.ok) throw new Error(`Add failed: ${res.status}`);
 
-      const data = await res.json();
+      // only parse JSON after ok
+      const data = JSON.parse(text);
       setActions((prev) => [data.action, ...prev]);
       setNewActionName('');
+
     } catch (e) {
       console.error(e);
       Alert.alert('Error', 'Could not add action.');
@@ -102,7 +108,7 @@ export default function ActionsScreen() {
     setActions((prev) =>
       prev.map((a) =>
         a.id === actionId
-          ? { ...a, status: a.status === 'done' ? 'pending' : 'done' }
+          ? { ...a, status: a.status === 'done' ? 'todo' : 'done' }
           : a
       )
     );
