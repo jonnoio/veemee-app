@@ -127,7 +127,7 @@ export default function ActionsScreen() {
   };
 
   const handleEditName = (action: Action) => {
-    Alert.prompt?.(
+    Alert.prompt(
       'Edit action',
       'Update the action name',
       [
@@ -135,14 +135,15 @@ export default function ActionsScreen() {
         {
           text: 'Save',
           onPress: async (text) => {
-            const name = (text || '').trim();
-            if (!name) return;
+            const newName = (text || '').trim();
+            if (!newName || newName === action.name.trim()) return;
 
             const token = await SecureStore.getItemAsync('veemee-jwt');
 
+            // optimistic update
             const before = actions;
             setActions((prev) =>
-              prev.map((a) => (a.id === action.id ? { ...a, name } : a))
+              prev.map((a) => (a.id === action.id ? { ...a, name: newName } : a))
             );
 
             try {
@@ -152,11 +153,12 @@ export default function ActionsScreen() {
                   Authorization: `Bearer ${token}`,
                   'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ name }),
+                body: JSON.stringify({ name: newName }),
               });
-              if (!res.ok) throw new Error();
-            } catch {
-              setActions(before);
+              if (!res.ok) throw new Error(`Update failed: ${res.status}`);
+            } catch (e) {
+              console.error(e);
+              setActions(before); // rollback
               Alert.alert('Error', 'Could not update action.');
             }
           },

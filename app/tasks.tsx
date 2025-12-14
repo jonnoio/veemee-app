@@ -2,30 +2,44 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
-import { FlatList, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
+const API_BASE = 'https://veemee.onrender.com';
 
 // Define task type
 type Task = {
   id: number;
   task_text: string;
-  status: string;
-  due_date: string;
-  category: string;
+  status: string; // 'todo' | 'done' etc
+  due_date: string | null;
+  category: string | null;
 };
 
 export default function TasksScreen() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [hideCompleted, setHideCompleted] = useState(false);
   const [currentTimerTaskId, setCurrentTimerTaskId] = useState<number | null>(null);
+
+  const [newTaskText, setNewTaskText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
   const { personaId } = useLocalSearchParams<{ personaId: string }>();
 
   const fetchTasks = async () => {
     try {
       const token = await SecureStore.getItemAsync('veemee-jwt');
-      const res = await fetch(`https://veemee.onrender.com/api/tasks/${personaId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const res = await fetch(`${API_BASE}/api/tasks/${personaId}`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       setTasks(data.tasks || []);
@@ -36,9 +50,50 @@ export default function TasksScreen() {
 
   useEffect(() => {
     fetchTasks();
-    const interval = setInterval(fetchTasks, 30000); // every 30s
+    const interval = setInterval(fetchTasks, 30000);
     return () => clearInterval(interval);
   }, [personaId]);
+
+  const handleAddTask = async () => {
+    const text = newTaskText.trim();
+    if (!text) return;
+
+    setSubmitting(true);
+    const token = await SecureStore.getItemAsync('veemee-jwt');
+
+    try {
+      // ✅ Assumed endpoint for creating a task under a persona
+      const res = await fetch(`${API_BASE}/api/personas/${personaId}/tasks`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ task_text: text }),
+      });
+
+      const bodyText = await res.text();
+      console.log('POST add task status:', res.status);
+      console.log('POST add task body:', bodyText);
+
+      if (!res.ok) throw new Error(`Add failed: ${res.status}`);
+
+      const data = JSON.parse(bodyText);
+      if (data.task) {
+        setTasks((prev) => [data.task, ...prev]);
+      } else {
+        // fallback if server doesn't return created task
+        fetchTasks();
+      }
+
+      setNewTaskText('');
+    } catch (err) {
+      console.error('Error adding task:', err);
+      Alert.alert('Error', 'Could not add task.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const toggleTaskStatus = async (taskId: number) => {
     const token = await SecureStore.getItemAsync('veemee-jwt');
@@ -53,11 +108,9 @@ export default function TasksScreen() {
     );
 
     try {
-      await fetch(`https://veemee.onrender.com/api/tasks/${taskId}/toggle`, {
+      await fetch(`${API_BASE}/api/tasks/${taskId}/toggle`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
     } catch (err) {
       console.error('Error updating task status:', err);
@@ -72,22 +125,17 @@ export default function TasksScreen() {
     }
   };
 
-  // Start/stop timer for a task
   const handleTimerPress = async (taskId: number) => {
     const token = await SecureStore.getItemAsync('veemee-jwt');
     try {
       if (currentTimerTaskId === taskId) {
-        // Stop current timer
-        await fetch('https://veemee.onrender.com/api/timer/stop', {
+        await fetch(`${API_BASE}/api/timer/stop`, {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         });
         setCurrentTimerTaskId(null);
       } else {
-        // Start timer for this task (backend should stop existing ones)
-        await fetch('https://veemee.onrender.com/api/timer/start', {
+        await fetch(`${API_BASE}/api/timer/start`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
@@ -102,34 +150,44 @@ export default function TasksScreen() {
     }
   };
 
-  // Go to task edit/details screen
+  // ✅ You said your edit screen file is app/tasks/[taskId].tsx
   const handleEditTask = (taskId: number) => {
     router.push({
-      pathname: '/task/[taskId]',
+      pathname: '/tasks/[taskId]',
       params: { taskId: taskId.toString(), personaId: personaId?.toString() },
     } as any);
   };
 
-  // View actions for this task
   const handleViewActions = (taskId: number) => {
     router.push({
       pathname: '/actions',
-      params: {
-        taskId: taskId.toString(),
-        personaId: personaId?.toString(),
-      },
+      params: { taskId: taskId.toString(), personaId: personaId?.toString() },
     } as any);
   };
-  
-  const filteredTasks = hideCompleted
-    ? tasks.filter((task) => task.status !== 'done')
-    : tasks;
+
+  const filteredTasks = hideCompleted ? tasks.filter((t) => t.status !== 'done') : tasks;
 
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
         <Text style={styles.heading}>Tasks</Text>
+
+        {/* Add task row */}
+        <View style={styles.addRow}>
+          <TextInput
+            value={newTaskText}
+            onChangeText={setNewTaskText}
+            placeholder="Add a task…"
+            style={styles.input}
+            editable={!submitting}
+            onSubmitEditing={handleAddTask}
+            returnKeyType="done"
+          />
+          <TouchableOpacity onPress={handleAddTask} disabled={submitting} style={styles.addBtn}>
+            {submitting ? <ActivityIndicator /> : <Ionicons name="add" size={22} color="#333" />}
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.toggleRow}>
           <Text style={styles.toggleLabel}>Hide completed tasks</Text>
@@ -141,11 +199,7 @@ export default function TasksScreen() {
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <View style={styles.taskBox}>
-              {/* Checkbox on the left */}
-              <TouchableOpacity
-                style={styles.checkbox}
-                onPress={() => toggleTaskStatus(item.id)}
-              >
+              <TouchableOpacity style={styles.checkbox} onPress={() => toggleTaskStatus(item.id)}>
                 <Ionicons
                   name={item.status === 'done' ? 'checkbox-outline' : 'square-outline'}
                   size={24}
@@ -153,17 +207,12 @@ export default function TasksScreen() {
                 />
               </TouchableOpacity>
 
-              {/* Task title in the middle – tap to edit */}
-              <TouchableOpacity
-                style={styles.taskTextWrapper}
-                onPress={() => handleEditTask(item.id)}
-              >
+              <TouchableOpacity style={styles.taskTextWrapper} onPress={() => handleEditTask(item.id)}>
                 <Text style={item.status === 'done' ? styles.taskDone : styles.taskText}>
                   {item.task_text}
                 </Text>
               </TouchableOpacity>
 
-              {/* Timer + actions icons on the right */}
               <View style={styles.taskActions}>
                 <TouchableOpacity onPress={() => handleTimerPress(item.id)}>
                   <Ionicons
@@ -172,19 +221,14 @@ export default function TasksScreen() {
                     color="#333"
                   />
                 </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => handleViewActions(item.id)}
-                  style={{ marginLeft: 12 }}
-                >
+                <TouchableOpacity onPress={() => handleViewActions(item.id)} style={{ marginLeft: 12 }}>
                   <Ionicons name="list-outline" size={24} color="#333" />
                 </TouchableOpacity>
               </View>
             </View>
           )}
-          ListEmptyComponent={<Text>Loading tasks...</Text>}
-          contentContainerStyle={
-            filteredTasks.length === 0 ? styles.emptyContainer : styles.listContainer
-          }
+          ListEmptyComponent={<Text style={{ textAlign: 'center' }}>Loading tasks...</Text>}
+          contentContainerStyle={filteredTasks.length === 0 ? styles.emptyContainer : styles.listContainer}
         />
 
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -198,6 +242,34 @@ export default function TasksScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f4f8', paddingTop: 60 },
   heading: { fontSize: 28, fontWeight: 'bold', marginVertical: 20, alignSelf: 'center' },
+
+  addRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginBottom: 10,
+    gap: 10,
+  },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    backgroundColor: '#fafafa',
+  },
+  addBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fafafa',
+  },
 
   taskBox: {
     backgroundColor: 'white',
@@ -214,20 +286,12 @@ const styles = StyleSheet.create({
     elevation: 3,
     marginHorizontal: 16,
   },
-  checkbox: {
-    marginRight: 12,
-  },
-  taskTextWrapper: {
-    flex: 1,
-  },
+  checkbox: { marginRight: 12 },
+  taskTextWrapper: { flex: 1 },
   taskText: { fontSize: 18, color: '#333' },
   taskDone: { fontSize: 18, color: '#999', textDecorationLine: 'line-through' },
 
-  taskActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
+  taskActions: { flexDirection: 'row', alignItems: 'center', marginLeft: 8 },
 
   backButton: {
     position: 'absolute',
@@ -245,8 +309,10 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
-  listContainer: { paddingBottom: 100 },
+
+  listContainer: { paddingBottom: 120 },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -254,8 +320,5 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 10,
   },
-  toggleLabel: {
-    fontSize: 16,
-    color: '#333',
-  },
+  toggleLabel: { fontSize: 16, color: '#333' },
 });
