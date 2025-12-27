@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { DEV_BYPASS_AUTH } from '@/config/dev';
@@ -53,7 +53,7 @@ export default function Dashboard() {
         useNativeDriver: true,
       }).start(() => bloom.setValue(0));
     }
-  }, [activeContext?.id, activeContext?.skinId, skin, bloom]);
+  }, [activeContext?.id, activeContext?.skinId, skin.motion, bloom]);
 
   const [personas, setPersonas] = useState<Persona[]>([]);
 
@@ -83,52 +83,58 @@ export default function Dashboard() {
     } as any);
   };
 
+  const fetchPersonas = useCallback(async () => {
+    try {
+      const ctxId = activeContext?.id;
+      if (!ctxId) {
+        setPersonas([]);
+        return;
+      }
+
+      // ✅ DEV MODE: return different personas per context (optional)
+      if (DEV_BYPASS_AUTH) {
+        if (ctxId === 1) {
+          setPersonas([{ id: 101, display_name: 'World', slug: 'world', task_count: 7, context_id: 1 }]);
+        } else if (ctxId === 2) {
+          setPersonas([{ id: 102, display_name: 'Weekday', slug: 'weekday', task_count: 12, context_id: 2 }]);
+        } else {
+          setPersonas([{ id: 103, display_name: 'Weekend', slug: 'weekend', task_count: 5, context_id: 3 }]);
+        }
+        return;
+      }
+
+      // Pretend JWT works (but keep the header wiring)
+      const token = await SecureStore.getItemAsync('veemee-jwt');
+      console.log('📦 JWT used for fetch:', token);
+
+      const url = `https://veemee.onrender.com/api/contexts/${ctxId}/personas`;
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      const text = await res.text();
+      console.log('🧾 Raw response:', text);
+
+      const data = JSON.parse(text);
+      console.log('✅ Parsed JSON:', data);
+
+      setPersonas(data.personas || []);
+    } catch (err) {
+      console.error('🔥 Fetch failed:', err);
+      setPersonas([]);
+    }
+  }, [activeContext?.id]);
+
   useEffect(() => {
     if (!DEV_BYPASS_AUTH && status !== 'authenticated') {
       console.log('🔒 Not authenticated yet, skipping fetch.');
       return;
     }
 
-    const fetchPersonas = async () => {
-      try {
-        // ✅ DEV MODE: don't hit backend at all (no JWT needed)
-        if (DEV_BYPASS_AUTH) {
-          setPersonas([
-            { id: 1, display_name: 'Work', slug: 'work', task_count: 12 },
-            { id: 2, display_name: 'Weekend', slug: 'weekend', task_count: 5 },
-          ]);
-          return;
-        }
-
-        const token = await SecureStore.getItemAsync('veemee-jwt');
-        console.log('📦 JWT used for fetch:', token);
-
-        const res = await fetch('https://veemee.onrender.com/api/personas', {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-
-        const text = await res.text();
-        console.log('🧾 Raw response:', text);
-
-        const data = JSON.parse(text);
-        console.log('✅ Parsed JSON:', data);
-
-        setPersonas(data.personas || []);
-      } catch (err) {
-        console.error('🔥 Fetch failed:', err);
-      }
-    };
-
     fetchPersonas();
     const interval = setInterval(fetchPersonas, 30000);
     return () => clearInterval(interval);
-  }, [status]);
-
-  useEffect(() => {
-    if (!DEV_BYPASS_AUTH && status === 'unauthenticated') {
-      router.replace('/auth/confirm');
-    }
-  }, [status]);
+  }, [status, activeContext?.id, fetchPersonas]);
 
   if (status === 'loading') {
     return (
