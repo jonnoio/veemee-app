@@ -17,6 +17,8 @@ export type ContextRow = {
 
 export type WastebasketPolicy = { retentionDays: number | null };
 
+const API_BASE = "https://veemee.onrender.com";
+
 type Store = {
   // NEW
   hydrated: boolean;
@@ -53,6 +55,29 @@ function seed(): ContextRow[] {
     { id: 2, name: "Weekday", skinId: "geo",    isArchived: false, isDeleted: false, order: 2 },
     { id: 3, name: "Weekend", skinId: "simple", isArchived: false, isDeleted: false, order: 3 },
   ];
+}
+
+type ApiContext = {
+  id: number;
+  handle?: string;
+  name?: string;         // if you return it
+  display_name?: string; // if you return it
+  skinId?: SkinId;       // if you return it
+  skin_id?: SkinId;      // if you return it snake_case
+  order?: number;
+  sort_order?: number;
+  is_default?: boolean;
+};
+
+function mapApiContext(c: ApiContext): ContextRow {
+  return {
+    id: c.id,
+    name: (c.name ?? c.display_name ?? c.handle ?? `Context ${c.id}`) as string,
+    skinId: (c.skinId ?? c.skin_id ?? "simple") as SkinId,
+    order: (c.order ?? c.sort_order ?? undefined) as any,
+    isArchived: false,
+    isDeleted: false,
+  };
 }
 
 export function ContextStoreProvider({ children }: { children: React.ReactNode }) {
@@ -93,6 +118,42 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // NEW: hydrate contexts from backend (pretend JWT works)
+  useEffect(() => {
+    (async () => {
+      try {
+        const jwt = await SecureStore.getItemAsync("veemee-jwt");
+        if (!jwt) return; // keep seed()
+
+        const res = await fetch(`${API_BASE}/api/contexts`, {
+          headers: { Authorization: `Bearer ${jwt}` },
+        });
+
+        const text = await res.text();
+        // If you accidentally get HTML (redirect), this will throw and we’ll keep seed()
+        const data = JSON.parse(text);
+
+        if (!Array.isArray(data.contexts)) return;
+
+        const mapped: ContextRow[] = data.contexts.map(mapApiContext);
+
+        // sort client-side just in case
+        mapped.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+
+        setContexts(mapped);
+
+        // If we don't have an active context yet, optionally pick default/first.
+        // Keep your “force user to choose” behavior if you prefer by removing this block.
+        setActiveContextId((prev) => {
+          if (prev != null && mapped.some((c) => c.id === prev)) return prev;
+          return null; // keep forcing a choice
+        });
+      } catch {
+        // silent fallback to seed()
+      }
+    })();
+  }, []); 
 
   // NEW: validate active context whenever contexts change (e.g., deleted/archived)
   useEffect(() => {
