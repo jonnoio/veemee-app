@@ -49,8 +49,9 @@ const nowIso = () => new Date().toISOString();
 
 function seed(): ContextRow[] {
   return [
-    { id: 1, name: "Work", skinId: "simple", isArchived: false, isDeleted: false, order: 1 },
-    { id: 2, name: "Weekend", skinId: "simple", isArchived: false, isDeleted: false, order: 2 },
+    { id: 1, name: "World",   skinId: "tide",   isArchived: false, isDeleted: false, order: 1 },
+    { id: 2, name: "Weekday", skinId: "geo",    isArchived: false, isDeleted: false, order: 2 },
+    { id: 3, name: "Weekend", skinId: "simple", isArchived: false, isDeleted: false, order: 3 },
   ];
 }
 

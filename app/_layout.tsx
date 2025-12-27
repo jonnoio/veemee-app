@@ -5,7 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 
 import { useColorScheme } from "@/hooks/useColorScheme";
-import { ContextStoreProvider } from "../state/ContextStore";
+import { ContextStoreProvider } from "@/state/ContextStore";
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -23,7 +23,7 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ headerShown: false }} />
 
           {/* contexts.tsx */}
-          <Stack.Screen name="contexts" options={{ title: "Contexts" }} />
+          <Stack.Screen name="contexts" options={{ headerShown: false }} />
 
           {/* dashboard.tsx */}
           <Stack.Screen name="dashboard" options={{ headerShown: false }} />
