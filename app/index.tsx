@@ -13,42 +13,42 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+
 import { useAuth } from '../lib/useAuth';
 
+import { useContextStore } from '@/state/ContextStore';
+import { SkinRegistry } from '@/state/skins';
+
+const DEV_BYPASS_AUTH = true;
+
 export default function HomeScreen() {
+  const skin = SkinRegistry.simple;
+
   const animation = useRef(new Animated.Value(1)).current;
   const router = useRouter();
   const { status } = useAuth();
+  const { activeContextId, hydrated } = useContextStore();
 
   const [serverStatus, setServerStatus] = useState<'checking' | 'up' | 'down'>('checking');
 
   console.log('🟠 useAuth status:', status);
+
   useEffect(() => {
-    console.log('🔵 HomeScreen mounted');
+    SecureStore.getItemAsync('veemee-jwt').then((token) => console.log('🔐 JWT in SecureStore:', token));
   }, []);
 
   useEffect(() => {
-    console.log('🟢 Auth status changed:', status);
-  }, [status]);
+    const checkServer = async () => {
+      try {
+        const res = await fetch('https://veemee.onrender.com/api/ping');
+        setServerStatus(res.ok ? 'up' : 'down');
+      } catch {
+        setServerStatus('down');
+      }
+    };
 
-  useEffect(() => {
-    SecureStore.getItemAsync('veemee-jwt').then((token) =>
-      console.log('🔐 JWT in SecureStore:', token)
-    );
-  }, []);
-
-  useEffect(() => {
-  const checkServer = async () => {
-    try {
-      const res = await fetch('https://veemee.onrender.com/api/ping');
-      setServerStatus(res.ok ? 'up' : 'down');
-    } catch {
-      setServerStatus('down');
-    }
-  };
-
-  checkServer();
-    const interval = setInterval(checkServer, 30000); // every 30 seconds
+    checkServer();
+    const interval = setInterval(checkServer, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -59,26 +59,21 @@ export default function HomeScreen() {
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(animation, {
-          toValue: 1.06,
-          duration: 1400,
-          useNativeDriver: true,
-        }),
-        Animated.timing(animation, {
-          toValue: 1,
-          duration: 1400,
-          useNativeDriver: true,
-        }),
+        Animated.timing(animation, { toValue: 1.06, duration: 1400, useNativeDriver: true }),
+        Animated.timing(animation, { toValue: 1, duration: 1400, useNativeDriver: true }),
       ])
     ).start();
-  }, []);
+  }, [animation]);
+
+  const isAuthed = DEV_BYPASS_AUTH ? true : status === 'authenticated';
 
   const handleTap = () => {
-    if (status === 'authenticated') {
-      router.push('/dashboard');
-    }
-  };
+    if (!isAuthed) return;
+    if (!hydrated) return;
 
+    router.replace(activeContextId ? '/dashboard' : '/contexts');
+  };
+  
   const handleSend = async () => {
     if (!email.includes('@')) {
       setError('Please enter a valid email');
@@ -113,34 +108,57 @@ export default function HomeScreen() {
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: skin.background }}>
       <Stack.Screen options={{ headerShown: false }} />
+
       <TouchableWithoutFeedback onPress={handleTap}>
         <KeyboardAvoidingView
-          style={styles.container}
+          style={[styles.container, { backgroundColor: skin.background }]}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <Animated.View style={[styles.circle, { transform: [{ scale: animation }] }]} />
-          <Text style={styles.message}>
-            {status === 'authenticated' ? 'Click to continue' : 'Enter email to continue'}
+          <Animated.View
+            style={[
+              styles.circle,
+              {
+                backgroundColor: skin.surface,
+                transform: [{ scale: animation }],
+              },
+            ]}
+          />
+
+          <Text style={[styles.message, { color: skin.text }]}>
+            {!hydrated
+              ? 'Waking up…'
+              : isAuthed
+              ? activeContextId
+                ? 'Click to continue'
+                : 'Choose a context'
+              : 'Enter email to continue'}
           </Text>
 
-          {status === 'unauthenticated' && (
-            <>
+          {!DEV_BYPASS_AUTH && status === 'unauthenticated' && (
+              <>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { borderColor: 'rgba(255,255,255,0.18)', color: skin.text }]}
                 placeholder="Enter your email"
+                placeholderTextColor={skin.muted}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={email}
                 onChangeText={setEmail}
               />
-              <TouchableOpacity style={styles.button} onPress={handleSend} disabled={sendStatus === 'sending'}>
-                <Text style={styles.buttonText}>
+
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: skin.accent }]}
+                onPress={handleSend}
+                disabled={sendStatus === 'sending'}
+              >
+                <Text style={[styles.buttonText, { color: '#0B0C10', fontWeight: '800' }]}>
                   {sendStatus === 'sending' ? 'Sending…' : 'Send Magic Link'}
                 </Text>
               </TouchableOpacity>
-              {sendStatus === 'sent' && <Text style={styles.success}>✅ Magic link sent!</Text>}
+
+              {sendStatus === 'sent' && <Text style={[styles.success, { color: skin.accent }]}>✅ Magic link sent!</Text>}
               {error !== '' && <Text style={styles.error}>❌ {error}</Text>}
 
               {/* 🔧 TEMP: internal test for /auth/confirm */}
@@ -150,7 +168,9 @@ export default function HomeScreen() {
                   onPress={() =>
                     router.push({
                       pathname: '/auth/confirm',
-                      params: { token: 'IndlYkBqb25jb2xsaW5zLmluZm8i.aTn2Sw.IX6QNfDBmQQJRY-yfF-ob5n5Wuc' },
+                      params: {
+                        token: 'IndlYkBqb25jb2xsaW5zLmluZm8i.aTn2Sw.IX6QNfDBmQQJRY-yfF-ob5n5Wuc',
+                      },
                     })
                   }
                 />
@@ -161,27 +181,19 @@ export default function HomeScreen() {
       </TouchableWithoutFeedback>
 
       {/* Server status indicator */}
-      <View style={styles.statusContainer}>
+      <View style={[styles.statusContainer, { backgroundColor: 'rgba(20,22,29,0.9)' }]}>
         <View
           style={[
             styles.statusDot,
             {
               backgroundColor:
-                serverStatus === 'up'
-                  ? 'green'
-                  : serverStatus === 'down'
-                  ? 'red'
-                  : 'gray',
+                serverStatus === 'up' ? 'green' : serverStatus === 'down' ? 'red' : 'gray',
             },
           ]}
         />
-        <Text style={styles.statusText}>
+        <Text style={[styles.statusText, { color: skin.muted }]}>
           Veemee server:{' '}
-          {serverStatus === 'checking'
-            ? 'Checking…'
-            : serverStatus === 'up'
-            ? 'Up'
-            : 'Down'}
+          {serverStatus === 'checking' ? 'Checking…' : serverStatus === 'up' ? 'Up' : 'Down'}
         </Text>
       </View>
     </View>
@@ -191,7 +203,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
@@ -200,7 +211,6 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
     borderRadius: 70,
-    backgroundColor: '#000',
     marginBottom: 30,
   },
   message: {
@@ -212,23 +222,19 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#ccc',
     borderRadius: 10,
     marginBottom: 12,
   },
   button: {
-    backgroundColor: '#333',
     paddingVertical: 12,
     paddingHorizontal: 30,
     borderRadius: 10,
   },
   buttonText: {
-    color: '#fff',
     fontSize: 16,
   },
   success: {
     marginTop: 20,
-    color: 'green',
     fontSize: 16,
   },
   error: {
@@ -236,13 +242,12 @@ const styles = StyleSheet.create({
     color: 'red',
     fontSize: 16,
   },
-    statusContainer: {
+  statusContainer: {
     position: 'absolute',
     bottom: 20,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
@@ -260,6 +265,5 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 14,
-    color: '#333',
   },
 });

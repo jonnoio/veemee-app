@@ -1,10 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { logout } from '../lib/auth'; // adjust path
+import { DEV_BYPASS_AUTH } from '@/config/dev';
+import { useContextStore } from '@/state/ContextStore';
+import { SkinRegistry } from '@/state/skins';
+import { logout } from '../lib/auth';
 import { useAuth } from '../lib/useAuth';
 
 type Persona = {
@@ -12,6 +15,7 @@ type Persona = {
   display_name: string;
   slug: string;
   task_count: number;
+  context_id?: number;
 };
 
 export default function Dashboard() {
@@ -19,11 +23,50 @@ export default function Dashboard() {
   const { status, email } = useAuth();
   console.log('🧠 Dashboard auth status:', status, email);
 
+  const { activeContext } = useContextStore();
+  const skin = SkinRegistry[activeContext?.skinId ?? 'simple'];
+
+  // 🌸 Bloom animation on context OR skin change
+  const bloom = useRef(new Animated.Value(0)).current;
+  const lastKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    const key = `${activeContext?.id ?? 'none'}:${activeContext?.skinId ?? 'none'}`;
+
+    // First render: don’t animate
+    if (lastKey.current === null) {
+      lastKey.current = key;
+      return;
+    }
+
+    // Animate only when context/skin changes
+    if (lastKey.current !== key) {
+      lastKey.current = key;
+
+      bloom.setValue(0);
+      const m = skin.motion;
+
+      Animated.timing(bloom, {
+        toValue: 1,
+        duration: m.bloomDurationMs,
+        easing: m.easing,
+        useNativeDriver: true,
+      }).start(() => bloom.setValue(0));
+    }
+  }, [activeContext?.id, activeContext?.skinId, skin, bloom]);
+
   const [personas, setPersonas] = useState<Persona[]>([]);
 
+  const personasToShow = useMemo(() => {
+    if (!activeContext) return personas;
+    const anyHasContext = personas.some((p) => typeof p.context_id === 'number');
+    if (!anyHasContext) return personas; // backend not returning context_id yet
+    return personas.filter((p) => p.context_id === activeContext.id);
+  }, [personas, activeContext]);
+
   const handleLogout = async () => {
-    await logout(); // remove JWT
-    router.replace('/'); // send back to landing/login screen
+    await logout();
+    router.replace('/');
   };
 
   const handleViewTasks = (personaId: number) => {
@@ -34,8 +77,6 @@ export default function Dashboard() {
   };
 
   const handleEditPersona = (personaId: number) => {
-    // ✅ CHANGE THIS if your persona edit route differs
-    // e.g. '/personas/[personaId]' or '/persona_edit' etc.
     router.push({
       pathname: '/persona/[personaId]',
       params: { personaId: personaId.toString() },
@@ -43,22 +84,31 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (status !== 'authenticated') {
+    if (!DEV_BYPASS_AUTH && status !== 'authenticated') {
       console.log('🔒 Not authenticated yet, skipping fetch.');
       return;
     }
 
     const fetchPersonas = async () => {
       try {
+        // ✅ DEV MODE: don't hit backend at all (no JWT needed)
+        if (DEV_BYPASS_AUTH) {
+          setPersonas([
+            { id: 1, display_name: 'Work', slug: 'work', task_count: 12 },
+            { id: 2, display_name: 'Weekend', slug: 'weekend', task_count: 5 },
+          ]);
+          return;
+        }
+
         const token = await SecureStore.getItemAsync('veemee-jwt');
         console.log('📦 JWT used for fetch:', token);
 
         const res = await fetch('https://veemee.onrender.com/api/personas', {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
 
         const text = await res.text();
-        console.log('🧾 Raw response:', text); // shows HTML if misrouted
+        console.log('🧾 Raw response:', text);
 
         const data = JSON.parse(text);
         console.log('✅ Parsed JSON:', data);
@@ -75,76 +125,117 @@ export default function Dashboard() {
   }, [status]);
 
   useEffect(() => {
-    if (status === 'unauthenticated') {
+    if (!DEV_BYPASS_AUTH && status === 'unauthenticated') {
       router.replace('/auth/confirm');
     }
   }, [status]);
 
   if (status === 'loading') {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-        <Text>Checking login…</Text>
+      <View style={[styles.centered, { backgroundColor: skin.background }]}>
+        <ActivityIndicator size="large" color={skin.accent} />
+        <Text style={{ color: skin.text, marginTop: 10 }}>Checking login…</Text>
       </View>
     );
   }
 
-  if (status === 'unauthenticated') return null;
+  if (!DEV_BYPASS_AUTH && status === 'unauthenticated') return null;
 
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={styles.container}>
-        <Text style={styles.heading}>Dashboard</Text>
-
-        <FlatList
-          contentContainerStyle={styles.listContainer}
-          data={personas}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={({ item }) => (
-            <View style={styles.row}>
-              {/* Main (tap to edit persona) */}
-              <TouchableOpacity style={styles.main} onPress={() => handleEditPersona(item.id)}>
-                <Text style={styles.title} numberOfLines={1}>
-                  {item.display_name}
-                </Text>
-                <Text style={styles.meta}>{item.task_count} tasks</Text>
-              </TouchableOpacity>
-
-              {/* Right icon (go to tasks) */}
-              <View style={styles.rightIcons}>
-                <TouchableOpacity onPress={() => handleViewTasks(item.id)} style={styles.iconBtn}>
-                  <Ionicons name="list-outline" size={24} color="#333" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-          ListEmptyComponent={<Text>Loading personas...</Text>}
+      <View style={[styles.shell, { backgroundColor: skin.background }]}>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.bloom,
+            {
+              backgroundColor: skin.accent,
+              opacity: bloom.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, skin.motion.bloomOpacity],
+              }),
+              transform: [
+                {
+                  scale: bloom.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [skin.motion.bloomScaleFrom, skin.motion.bloomScaleTo],
+                  }),
+                },
+              ],
+            },
+          ]}
         />
 
-        <TouchableOpacity style={styles.backButton} onPress={() => router.push('/')}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
+        <View style={[styles.container, { backgroundColor: skin.background }]}>
+          <Text style={[styles.heading, { color: skin.text }]}>{activeContext ? activeContext.name : 'Dashboard'}</Text>
 
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={24} color="#fff" />
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.contextButton, { backgroundColor: skin.accent }]}
+            onPress={() => router.push('/contexts')}
+          >
+            <Text style={{ color: '#0B0C10', fontWeight: '800' }}>Switch context</Text>
+          </TouchableOpacity>
+
+          <FlatList
+            contentContainerStyle={styles.listContainer}
+            data={personasToShow}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={({ item }) => (
+              <View style={[styles.row, { backgroundColor: skin.surface }]}>
+                <TouchableOpacity style={styles.main} onPress={() => handleEditPersona(item.id)}>
+                  <Text style={[styles.title, { color: skin.text }]} numberOfLines={1}>
+                    {item.display_name}
+                  </Text>
+                  <Text style={[styles.meta, { color: skin.muted }]}>{item.task_count} tasks</Text>
+                </TouchableOpacity>
+
+                <View style={styles.rightIcons}>
+                  <TouchableOpacity onPress={() => handleViewTasks(item.id)} style={styles.iconBtn}>
+                    <Ionicons name="list-outline" size={24} color={skin.text} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+            ListEmptyComponent={<Text style={{ color: skin.muted }}>Loading personas...</Text>}
+          />
+
+          <TouchableOpacity
+            style={[styles.backButton, { backgroundColor: skin.surface }]}
+            onPress={() => router.push('/contexts')}
+          >
+            <Ionicons name="arrow-back" size={24} color={skin.text} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.logoutButton, { backgroundColor: skin.surface }]} onPress={handleLogout}>
+            <Ionicons name="log-out-outline" size={24} color={skin.text} />
+          </TouchableOpacity>
+        </View>
       </View>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f4f8', paddingTop: 60 },
-  heading: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  container: { flex: 1, paddingTop: 60 },
+  heading: { fontSize: 24, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
 
-  // NEW: consistent row styling (matches tasks/actions vibe)
+  shell: { flex: 1 },
+  bloom: { ...StyleSheet.absoluteFillObject, borderRadius: 28 },
+
+  contextButton: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    marginBottom: 12,
+  },
+
   listContainer: { paddingHorizontal: 16, paddingBottom: 120 },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'white',
     paddingHorizontal: 14,
     paddingVertical: 14,
     marginVertical: 8,
@@ -158,8 +249,8 @@ const styles = StyleSheet.create({
   },
 
   main: { flex: 1 },
-  title: { fontSize: 18, color: '#333', fontWeight: '600' },
-  meta: { fontSize: 12, color: '#777', marginTop: 4 },
+  title: { fontSize: 18, fontWeight: '600' },
+  meta: { fontSize: 12, marginTop: 4 },
 
   rightIcons: { flexDirection: 'row', alignItems: 'center' },
   iconBtn: { padding: 8 },
@@ -168,7 +259,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 30,
     left: 30,
-    backgroundColor: '#333',
     width: 50,
     height: 50,
     borderRadius: 25,
@@ -184,7 +274,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 30,
     right: 30,
-    backgroundColor: '#333',
     width: 50,
     height: 50,
     borderRadius: 25,
