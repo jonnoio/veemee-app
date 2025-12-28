@@ -80,7 +80,7 @@ export default function Contexts() {
     const i = Math.floor((effectiveX + SNAP / 2) / SNAP);
 
     // data = [sentinelLast, ...visible (len N), sentinelFirst]
-    const lastRealIndex = visible.length; // index of last real item inside `data`
+    const lastRealIndex = visible.length; // index of last real item inside data
     const trailingSentinelIndex = lastRealIndex + 1;
 
     if (i === 0) {
@@ -111,7 +111,7 @@ export default function Contexts() {
         <Animated.FlatList
           ref={listRef}
           data={data as any}
-          keyExtractor={(item, idx) => `${item.id}-${idx}`} // allow sentinels
+          keyExtractor={(item, idx) => ${item.id}-${idx}} // allow sentinels
           horizontal
           showsHorizontalScrollIndicator={false}
           snapToInterval={SNAP}

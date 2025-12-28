@@ -33,13 +33,11 @@ export default function Dashboard() {
   useEffect(() => {
     const key = `${activeContext?.id ?? 'none'}:${activeContext?.skinId ?? 'none'}`;
 
-    // First render: don’t animate
     if (lastKey.current === null) {
       lastKey.current = key;
       return;
     }
 
-    // Animate only when context/skin changes
     if (lastKey.current !== key) {
       lastKey.current = key;
 
@@ -91,25 +89,21 @@ export default function Dashboard() {
         return;
       }
 
-      // ✅ DEV MODE: return different personas per context (optional)
-      if (DEV_BYPASS_AUTH) {
-        if (ctxId === 1) {
-          setPersonas([{ id: 101, display_name: 'World', slug: 'world', task_count: 7, context_id: 1 }]);
-        } else if (ctxId === 2) {
-          setPersonas([{ id: 102, display_name: 'Weekday', slug: 'weekday', task_count: 12, context_id: 2 }]);
-        } else {
-          setPersonas([{ id: 103, display_name: 'Weekend', slug: 'weekend', task_count: 5, context_id: 3 }]);
-        }
-        return;
-      }
-
-      // Pretend JWT works (but keep the header wiring)
+      // DEV_BYPASS_AUTH should only bypass *login*, not data fetching.
+      // But while you're still wiring, we can allow it to fall through:
+      // if there is a token, use it; if not, just skip.
       const token = await SecureStore.getItemAsync('veemee-jwt');
       console.log('📦 JWT used for fetch:', token);
 
+      if (!token) {
+        console.log('⚠️ No JWT yet, skipping personas fetch.');
+        setPersonas([]);
+        return;
+      }
+
       const url = `https://veemee.onrender.com/api/contexts/${ctxId}/personas`;
       const res = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       const text = await res.text();
@@ -126,15 +120,10 @@ export default function Dashboard() {
   }, [activeContext?.id]);
 
   useEffect(() => {
-    if (!DEV_BYPASS_AUTH && status !== 'authenticated') {
-      console.log('🔒 Not authenticated yet, skipping fetch.');
-      return;
-    }
-
     fetchPersonas();
     const interval = setInterval(fetchPersonas, 30000);
     return () => clearInterval(interval);
-  }, [status, activeContext?.id, fetchPersonas]);
+  }, [activeContext?.id, fetchPersonas]);
 
   if (status === 'loading') {
     return (
@@ -145,6 +134,7 @@ export default function Dashboard() {
     );
   }
 
+  // keep your existing behaviour for now
   if (!DEV_BYPASS_AUTH && status === 'unauthenticated') return null;
 
   return (
@@ -174,7 +164,9 @@ export default function Dashboard() {
         />
 
         <View style={[styles.container, { backgroundColor: skin.background }]}>
-          <Text style={[styles.heading, { color: skin.text }]}>{activeContext ? activeContext.name : 'Dashboard'}</Text>
+          <Text style={[styles.heading, { color: skin.text }]}>
+            {activeContext ? activeContext.name : 'Dashboard'}
+          </Text>
 
           <TouchableOpacity
             style={[styles.contextButton, { backgroundColor: skin.accent }]}
