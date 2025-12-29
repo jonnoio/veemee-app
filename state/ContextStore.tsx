@@ -15,12 +15,19 @@ export type ContextRow = {
   deletedFromState?: "active" | "archived";
 };
 
+export type Persona = {
+  id: number;
+  display_name: string;
+  slug: string;
+  task_count: number;
+  context_id?: number;
+};
+
 export type WastebasketPolicy = { retentionDays: number | null };
 
 const API_BASE = "https://veemee.onrender.com";
 
 type Store = {
-  // NEW
   hydrated: boolean;
 
   activeContextId: number | null;
@@ -42,6 +49,14 @@ type Store = {
   purgeContext(id: number): void;
 
   setWastebasketPolicy(p: WastebasketPolicy): void;
+
+  // Personas cache (per context)
+  personasByContextId: Record<number, Persona[]>;
+  personasFetchedAt: Record<number, number>;
+  personasLoadingByContextId: Record<number, boolean>;
+
+  fetchPersonasForContext(contextId: number, opts?: { force?: boolean }): Promise<void>;
+  prefetchPersonasForContexts(contextIds: number[]): Promise<void>;
 };
 
 const Ctx = createContext<Store | null>(null);
@@ -49,10 +64,23 @@ const Ctx = createContext<Store | null>(null);
 const ACTIVE_CONTEXT_KEY = "veemee-active-context-id";
 const nowIso = () => new Date().toISOString();
 
+function loadingSeed(): ContextRow[] {
+  return [
+    {
+      id: -1,
+      name: "Loading…",
+      skinId: "simple",
+      isArchived: false,
+      isDeleted: false,
+      order: 0,
+    },
+  ];
+}
+
 function seed(): ContextRow[] {
   return [
-    { id: 1, name: "World",   skinId: "tide",   isArchived: false, isDeleted: false, order: 1 },
-    { id: 2, name: "Weekday", skinId: "geo",    isArchived: false, isDeleted: false, order: 2 },
+    { id: 1, name: "World", skinId: "tide", isArchived: false, isDeleted: false, order: 1 },
+    { id: 2, name: "Weekday", skinId: "geo", isArchived: false, isDeleted: false, order: 2 },
     { id: 3, name: "Weekend", skinId: "simple", isArchived: false, isDeleted: false, order: 3 },
   ];
 }
@@ -60,10 +88,10 @@ function seed(): ContextRow[] {
 type ApiContext = {
   id: number;
   handle?: string;
-  name?: string;         // if you return it
-  display_name?: string; // if you return it
-  skinId?: SkinId;       // if you return it
-  skin_id?: SkinId;      // if you return it snake_case
+  name?: string;
+  display_name?: string;
+  skinId?: SkinId;
+  skin_id?: SkinId;
   order?: number;
   sort_order?: number;
   is_default?: boolean;
@@ -80,14 +108,53 @@ function mapApiContext(c: ApiContext): ContextRow {
   };
 }
 
-export function ContextStoreProvider({ children }: { children: React.ReactNode }) {
-  const [contexts, setContexts] = useState<ContextRow[]>(seed());
+const PERSONA_TTL_MS = 90_000;
+const PREFETCH_CONCURRENCY = 3;
 
-  // NEW: start null; we'll hydrate from SecureStore
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>
+) {
+  const queue = [...items];
+  const runners = Array.from({ length: Math.min(limit, queue.length) }).map(async () => {
+    while (queue.length) {
+      const next = queue.shift();
+      if (next === undefined) return;
+      await worker(next);
+    }
+  });
+  await Promise.all(runners);
+}
+
+async function fetchPersonasApi(contextId: number): Promise<Persona[]> {
+  const jwt = await SecureStore.getItemAsync("veemee-jwt");
+  if (!jwt) return [];
+
+  const res = await fetch(`${API_BASE}/api/contexts/${contextId}/personas`, {
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+
+  const text = await res.text();
+  const data = JSON.parse(text);
+  return data.personas || [];
+}
+
+export function ContextStoreProvider({ children }: { children: React.ReactNode }) {
+  const [contexts, setContexts] = useState<ContextRow[]>(loadingSeed());
+
+  // start null; we'll hydrate from SecureStore
   const [activeContextId, setActiveContextId] = useState<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
-  const [wastebasketPolicy, setWastebasketPolicy] = useState<WastebasketPolicy>({ retentionDays: null });
+  const [wastebasketPolicy, setWastebasketPolicy] = useState<WastebasketPolicy>({
+    retentionDays: null,
+  });
+
+  // Personas cache
+  const [personasByContextId, setPersonasByContextId] = useState<Record<number, Persona[]>>({});
+  const [personasFetchedAt, setPersonasFetchedAt] = useState<Record<number, number>>({});
+  const [personasLoadingByContextId, setPersonasLoadingByContextId] = useState<Record<number, boolean>>({});
 
   const getVisible = (all: ContextRow[]) => all.filter((c) => !c.isDeleted && !c.isArchived);
 
@@ -96,7 +163,7 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     return v.length ? v[0].id : null;
   };
 
-  // NEW: hydrate activeContextId once
+  // hydrate activeContextId once
   useEffect(() => {
     (async () => {
       try {
@@ -106,20 +173,17 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
           const id = Number(raw);
           setActiveContextId(Number.isNaN(id) ? null : id);
         } else {
-          // nothing saved yet -> force user to choose
           setActiveContextId(null);
         }
       } catch {
-        // if SecureStore fails, still force a choice rather than silently defaulting
         setActiveContextId(null);
       } finally {
         setHydrated(true);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // NEW: hydrate contexts from backend (pretend JWT works)
+  // hydrate contexts from backend
   useEffect(() => {
     (async () => {
       try {
@@ -131,20 +195,15 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
         });
 
         const text = await res.text();
-        // If you accidentally get HTML (redirect), this will throw and we’ll keep seed()
         const data = JSON.parse(text);
 
         if (!Array.isArray(data.contexts)) return;
 
         const mapped: ContextRow[] = data.contexts.map(mapApiContext);
-
-        // sort client-side just in case
         mapped.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
 
         setContexts(mapped);
 
-        // If we don't have an active context yet, optionally pick default/first.
-        // Keep your “force user to choose” behavior if you prefer by removing this block.
         setActiveContextId((prev) => {
           if (prev != null && mapped.some((c) => c.id === prev)) return prev;
           return null; // keep forcing a choice
@@ -153,9 +212,9 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
         // silent fallback to seed()
       }
     })();
-  }, []); 
+  }, []);
 
-  // NEW: validate active context whenever contexts change (e.g., deleted/archived)
+  // validate active context whenever contexts change
   useEffect(() => {
     if (!hydrated) return;
     if (activeContextId == null) return;
@@ -164,7 +223,7 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     if (!ok) setActiveContextId(getFallbackId(contexts));
   }, [contexts, activeContextId, hydrated]);
 
-  // NEW: persist on change
+  // persist on change
   useEffect(() => {
     if (!hydrated) return;
 
@@ -176,7 +235,7 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
           await SecureStore.setItemAsync(ACTIVE_CONTEXT_KEY, String(activeContextId));
         }
       } catch {
-        // non-fatal; ignore
+        // ignore
       }
     })();
   }, [activeContextId, hydrated]);
@@ -185,6 +244,39 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     () => contexts.find((c) => c.id === activeContextId) ?? null,
     [contexts, activeContextId]
   );
+
+  // ✅ single implementation (no duplicates)
+  const fetchPersonasForContext = async (contextId: number, opts?: { force?: boolean }) => {
+    if (!contextId) return;
+
+    const force = !!opts?.force;
+    const last = personasFetchedAt[contextId] ?? 0;
+    const fresh = Date.now() - last < PERSONA_TTL_MS;
+
+    if (!force && fresh) return;
+    if (personasLoadingByContextId[contextId]) return;
+
+    setPersonasLoadingByContextId((prev) => ({ ...prev, [contextId]: true }));
+
+    try {
+      const personas = await fetchPersonasApi(contextId);
+      setPersonasByContextId((prev) => ({ ...prev, [contextId]: personas }));
+      setPersonasFetchedAt((prev) => ({ ...prev, [contextId]: Date.now() }));
+    } catch (e) {
+      console.error("🔥 fetchPersonasForContext failed:", e);
+    } finally {
+      setPersonasLoadingByContextId((prev) => ({ ...prev, [contextId]: false }));
+    }
+  };
+
+  const prefetchPersonasForContexts = async (contextIds: number[]) => {
+    const ids = Array.from(new Set(contextIds)).filter((x) => typeof x === "number" && x > 0);
+    if (!ids.length) return;
+
+    await runWithConcurrency(ids, PREFETCH_CONCURRENCY, async (id) => {
+      await fetchPersonasForContext(id);
+    });
+  };
 
   const store: Store = useMemo(
     () => ({
@@ -212,7 +304,7 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
           order: input.order,
         };
         setContexts((prev) => [...prev, row]);
-        setActiveContextId(id); // makes new context immediately active
+        setActiveContextId(id);
         return id;
       },
 
@@ -267,8 +359,24 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
       setWastebasketPolicy(p) {
         setWastebasketPolicy(p);
       },
+
+      // ✅ exported cache + fetchers
+      personasByContextId,
+      personasFetchedAt,
+      personasLoadingByContextId,
+      fetchPersonasForContext,
+      prefetchPersonasForContexts,
     }),
-    [hydrated, activeContextId, contexts, wastebasketPolicy, activeContext]
+    [
+      hydrated,
+      activeContextId,
+      contexts,
+      wastebasketPolicy,
+      activeContext,
+      personasByContextId,
+      personasFetchedAt,
+      personasLoadingByContextId,
+    ]
   );
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

@@ -1,22 +1,21 @@
 import { useContextStore } from "@/state/ContextStore";
 import { SkinRegistry } from "@/state/skins";
-import { Stack } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { Stack, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
+  FlatList,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
-
-import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import { ActivityIndicator, FlatList, TouchableOpacity } from "react-native";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const CARD_W = Math.round(SCREEN_W * 0.82);
@@ -38,16 +37,21 @@ type Item = {
   isArchived: boolean;
 };
 
-type Persona = {
-  id: number;
-  display_name: string;
-  slug: string;
-  task_count: number;
-  context_id?: number;
-};
-
 export default function Contexts() {
-  const { contexts, activeContextId, switchContext, createContext } = useContextStore();
+  const router = useRouter();
+
+  const {
+    contexts,
+    activeContextId,
+    switchContext,
+    createContext,
+
+    // persona cache + prefetch
+    fetchPersonasForContext,
+    prefetchPersonasForContexts,
+    personasByContextId,
+    personasLoadingByContextId,
+  } = useContextStore();
 
   console.log("🔥 RUNNING app/index.tsx");
 
@@ -57,52 +61,6 @@ export default function Contexts() {
   const isOpen = openContextId !== null;
   const selectedId = openContextId ?? activeContextId;
 
-  const router = useRouter();
-
-  const [personas, setPersonas] = useState<Persona[]>([]);
-  const [personasLoading, setPersonasLoading] = useState(false);
-
-  const ctxIdForPersonas = openContextId ?? activeContextId;
-
-  const fetchPersonas = React.useCallback(async () => {
-    try {
-      const ctxId = ctxIdForPersonas;
-      if (!ctxId) {
-        setPersonas([]);
-        return;
-      }
-
-      setPersonasLoading(true);
-
-      const token = await SecureStore.getItemAsync("veemee-jwt");
-      if (!token) {
-        setPersonas([]);
-        return;
-      }
-
-      const url = `https://veemee.onrender.com/api/contexts/${ctxId}/personas`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const text = await res.text();
-      const json = JSON.parse(text);
-      setPersonas(json.personas || []);
-    } catch (err) {
-      console.error("🔥 Personas fetch failed:", err);
-      setPersonas([]);
-    } finally {
-      setPersonasLoading(false);
-    }
-  }, [ctxIdForPersonas]);
-
-  useEffect(() => {
-    if (!isOpen) return; // only fetch when open
-    fetchPersonas();
-    const interval = setInterval(fetchPersonas, 30000);
-    return () => clearInterval(interval);
-  }, [isOpen, fetchPersonas]);
-
   const visible = useMemo(
     () =>
       contexts
@@ -110,6 +68,12 @@ export default function Contexts() {
         .sort((a, b) => (a.order ?? 999) - (b.order ?? 999)),
     [contexts]
   );
+
+  // ✅ Start warming personas as soon as this screen opens (and when contexts change)
+  useEffect(() => {
+    if (!visible.length) return;
+    prefetchPersonasForContexts(visible.map((c) => c.id));
+  }, [visible, prefetchPersonasForContexts]);
 
   // Sentinel list: [last, ...visible, first]
   const data = useMemo(() => {
@@ -138,7 +102,7 @@ export default function Contexts() {
 
   const dockTranslateY = dockY.interpolate({
     inputRange: [0, 1],
-    outputRange: [Math.max(80, Math.round(SCREEN_H * 0.16)), 0], // tweak to taste
+    outputRange: [Math.max(80, Math.round(SCREEN_H * 0.16)), 0],
     extrapolate: "clamp",
   });
 
@@ -175,7 +139,6 @@ export default function Contexts() {
   }, [isOpen, showIntroHeader, introOpacity]);
 
   const jumpToIndex = (index: number) => {
-    // IMPORTANT: include SIDE padding in the offset
     const offset = SIDE + SNAP * index;
     listRef.current?.scrollToOffset({ offset, animated: false });
   };
@@ -239,17 +202,9 @@ export default function Contexts() {
     setOpenContextId(current ?? id);
   };
 
-  // Handle adding a context and opening it (even if createContext doesn't return an id)
+  // Handle adding a context and opening it
   const pendingOpenNew = useRef(false);
   const prevVisibleCount = useRef(visible.length);
-
-  const handleViewTasks = (personaId: number) => {
-    router.push({ pathname: "/tasks", params: { personaId: String(personaId) } } as any);
-  };
-
-  const handleEditPersona = (personaId: number) => {
-    router.push({ pathname: "/persona/[personaId]", params: { personaId: String(personaId) } } as any);
-  };
 
   useEffect(() => {
     if (!pendingOpenNew.current) {
@@ -257,7 +212,6 @@ export default function Contexts() {
       return;
     }
 
-    // Wait for store to update, then open the newest visible context (last by order)
     if (visible.length > prevVisibleCount.current) {
       const newest = visible[visible.length - 1];
       if (newest) {
@@ -275,7 +229,25 @@ export default function Contexts() {
     createContext({ name: "New context", skinId: "simple" });
   };
 
+  // --- open mode persona data from cache ---
   const openContext = openContextId ? visible.find((c) => c.id === openContextId) : null;
+
+  const personas = openContextId ? personasByContextId[openContextId] ?? [] : [];
+  const personasLoading = openContextId ? !!personasLoadingByContextId[openContextId] : false;
+
+  // Ensure current open context is fetched (TTL protected in store)
+  useEffect(() => {
+    if (!isOpen || !openContextId) return;
+    fetchPersonasForContext(openContextId);
+  }, [isOpen, openContextId, fetchPersonasForContext]);
+
+  const handleViewTasks = (personaId: number) => {
+    router.push({ pathname: "/tasks", params: { personaId: String(personaId) } } as any);
+  };
+
+  const handleEditPersona = (personaId: number) => {
+    router.push({ pathname: "/persona/[personaId]", params: { personaId: String(personaId) } } as any);
+  };
 
   return (
     <>
@@ -289,7 +261,7 @@ export default function Contexts() {
           </Animated.View>
         )}
 
-        {/* Carousel dock stays above openArea */}
+        {/* Carousel dock */}
         <Animated.View style={{ transform: [{ translateY: dockTranslateY }] }}>
           <Animated.FlatList
             ref={listRef}
@@ -346,7 +318,6 @@ export default function Contexts() {
                     style={[
                       styles.cardInner,
                       {
-                        // palette-aware “surface” and border
                         backgroundColor: skin.surface ?? skin.background,
                         minHeight: cardHeight,
                         justifyContent: "center",
@@ -377,6 +348,7 @@ export default function Contexts() {
           />
         </Animated.View>
 
+        {/* Open mode personas */}
         {isOpen && (
           <View
             style={[
@@ -384,6 +356,14 @@ export default function Contexts() {
               { backgroundColor: chromeSkin.surface ?? "rgba(255,255,255,0.06)" },
             ]}
           >
+            {/* Optional: show the open context name pill */}
+            <View style={[styles.openHeaderPill, { backgroundColor: chromeSkin.surface }]}>
+              <View style={[styles.openHeaderDot, { backgroundColor: chromeSkin.accent }]} />
+              <Text style={[styles.openHeaderText, { color: chromeSkin.text }]}>
+                {openContext?.name ?? "Context"}
+              </Text>
+            </View>
+
             {personasLoading ? (
               <View style={{ paddingTop: 18, alignItems: "center" }}>
                 <ActivityIndicator />
@@ -459,16 +439,23 @@ const styles = StyleSheet.create({
   openHeaderDot: { width: 10, height: 10, borderRadius: 5 },
   openHeaderText: { fontSize: 16, fontWeight: "900" },
 
-  openArea: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 18,
-  },
-
   personaPanel: {
     flex: 1,
     borderRadius: 18,
     padding: 16,
+  },
+
+  personaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  personaIconBtn: {
+    padding: 8,
   },
 
   fab: {
@@ -491,19 +478,5 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#0B0C10",
     lineHeight: 34,
-  },
-
-  personaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 10,
-  },
-
-  personaIconBtn: {
-    padding: 8,
   },
 });
