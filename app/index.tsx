@@ -13,6 +13,11 @@ import {
   View,
 } from "react-native";
 
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
+import { ActivityIndicator, FlatList, TouchableOpacity } from "react-native";
+
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const CARD_W = Math.round(SCREEN_W * 0.82);
 const GAP = 14;
@@ -33,6 +38,14 @@ type Item = {
   isArchived: boolean;
 };
 
+type Persona = {
+  id: number;
+  display_name: string;
+  slug: string;
+  task_count: number;
+  context_id?: number;
+};
+
 export default function Contexts() {
   const { contexts, activeContextId, switchContext, createContext } = useContextStore();
 
@@ -43,6 +56,52 @@ export default function Contexts() {
   const [openContextId, setOpenContextId] = useState<number | null>(null);
   const isOpen = openContextId !== null;
   const selectedId = openContextId ?? activeContextId;
+
+  const router = useRouter();
+
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [personasLoading, setPersonasLoading] = useState(false);
+
+  const ctxIdForPersonas = openContextId ?? activeContextId;
+
+  const fetchPersonas = React.useCallback(async () => {
+    try {
+      const ctxId = ctxIdForPersonas;
+      if (!ctxId) {
+        setPersonas([]);
+        return;
+      }
+
+      setPersonasLoading(true);
+
+      const token = await SecureStore.getItemAsync("veemee-jwt");
+      if (!token) {
+        setPersonas([]);
+        return;
+      }
+
+      const url = `https://veemee.onrender.com/api/contexts/${ctxId}/personas`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const text = await res.text();
+      const json = JSON.parse(text);
+      setPersonas(json.personas || []);
+    } catch (err) {
+      console.error("🔥 Personas fetch failed:", err);
+      setPersonas([]);
+    } finally {
+      setPersonasLoading(false);
+    }
+  }, [ctxIdForPersonas]);
+
+  useEffect(() => {
+    if (!isOpen) return; // only fetch when open
+    fetchPersonas();
+    const interval = setInterval(fetchPersonas, 30000);
+    return () => clearInterval(interval);
+  }, [isOpen, fetchPersonas]);
 
   const visible = useMemo(
     () =>
@@ -184,6 +243,14 @@ export default function Contexts() {
   const pendingOpenNew = useRef(false);
   const prevVisibleCount = useRef(visible.length);
 
+  const handleViewTasks = (personaId: number) => {
+    router.push({ pathname: "/tasks", params: { personaId: String(personaId) } } as any);
+  };
+
+  const handleEditPersona = (personaId: number) => {
+    router.push({ pathname: "/persona/[personaId]", params: { personaId: String(personaId) } } as any);
+  };
+
   useEffect(() => {
     if (!pendingOpenNew.current) {
       prevVisibleCount.current = visible.length;
@@ -311,24 +378,45 @@ export default function Contexts() {
         </Animated.View>
 
         {isOpen && (
-          <View style={styles.openArea}>
-            <View style={[styles.openHeaderPill, { backgroundColor: chromeSkin.surface }]}>
-              <View style={[styles.openHeaderDot, { backgroundColor: chromeSkin.accent }]} />
-              <Text style={[styles.openHeaderText, { color: chromeSkin.text }]}>
-                {openContext?.name ?? "Context"}
-              </Text>
-            </View>
+          <View
+            style={[
+              styles.personaPanel,
+              { backgroundColor: chromeSkin.surface ?? "rgba(255,255,255,0.06)" },
+            ]}
+          >
+            {personasLoading ? (
+              <View style={{ paddingTop: 18, alignItems: "center" }}>
+                <ActivityIndicator />
+                <Text style={{ color: chromeSkin.muted, marginTop: 10 }}>Loading personas…</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={personas}
+                keyExtractor={(p) => String(p.id)}
+                contentContainerStyle={{ paddingVertical: 6 }}
+                renderItem={({ item }) => (
+                  <View style={[styles.personaRow, { borderColor: chromeSkin.muted ?? chromeSkin.text }]}>
+                    <TouchableOpacity style={{ flex: 1 }} onPress={() => handleEditPersona(item.id)}>
+                      <Text style={{ color: chromeSkin.text, fontWeight: "800" }} numberOfLines={1}>
+                        {item.display_name}
+                      </Text>
+                      <Text style={{ color: chromeSkin.muted, marginTop: 2, fontSize: 12 }}>
+                        {item.task_count} tasks
+                      </Text>
+                    </TouchableOpacity>
 
-            <View
-              style={[
-                styles.personaPanel,
-                { backgroundColor: chromeSkin.surface ?? "rgba(255,255,255,0.06)" },
-              ]}
-            >
-              <Text style={{ color: chromeSkin.muted }}>
-                Personas go here (list/grid/flower/house later).
-              </Text>
-            </View>
+                    <TouchableOpacity onPress={() => handleViewTasks(item.id)} style={styles.personaIconBtn}>
+                      <Ionicons name="list-outline" size={22} color={chromeSkin.text} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+                ListEmptyComponent={
+                  <Text style={{ color: chromeSkin.muted, paddingTop: 14 }}>
+                    No personas yet.
+                  </Text>
+                }
+              />
+            )}
           </View>
         )}
 
@@ -403,5 +491,19 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#0B0C10",
     lineHeight: 34,
+  },
+
+  personaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+
+  personaIconBtn: {
+    padding: 8,
   },
 });
