@@ -170,7 +170,7 @@ export default function Dashboard() {
 
           <TouchableOpacity
             style={[styles.contextButton, { backgroundColor: skin.accent }]}
-            onPress={() => router.push('/contexts')}
+            onPress={() => router.push('/')}
           >
             <Text style={{ color: '#0B0C10', fontWeight: '800' }}>Switch context</Text>
           </TouchableOpacity>
@@ -200,7 +200,7 @@ export default function Dashboard() {
 
           <TouchableOpacity
             style={[styles.backButton, { backgroundColor: skin.surface }]}
-            onPress={() => router.push('/contexts')}
+            onPress={() => router.push('/')}
           >
             <Ionicons name="arrow-back" size={24} color={skin.text} />
           </TouchableOpacity>

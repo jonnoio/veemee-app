@@ -1,217 +1,407 @@
-import { Stack, useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import { useContextStore } from "@/state/ContextStore";
+import { SkinRegistry } from "@/state/skins";
+import { Stack } from "expo-router";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  KeyboardAvoidingView,
-  Platform,
+  Dimensions,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Pressable,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
   View,
 } from "react-native";
 
-import { DEV_BYPASS_AUTH } from "@/config/dev";
-import { useContextStore } from "@/state/ContextStore";
-import { SkinRegistry } from "@/state/skins";
-import { ensureDevJwt } from "../lib/devAuth";
-import { useAuth } from "../lib/useAuth";
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+const CARD_W = Math.round(SCREEN_W * 0.82);
+const GAP = 14;
+const SNAP = CARD_W + GAP;
+const SIDE = Math.round((SCREEN_W - CARD_W) / 2);
+const closedCardHeight = 220; // tune
+const openCardHeight = 84; // tune
 
-export default function HomeScreen() {
-  const skin = SkinRegistry.simple;
+// ✅ App-session flag: show intro header only once per app run
+let hasShownContextsIntroHeader = false;
 
-  const animation = useRef(new Animated.Value(1)).current;
-  const router = useRouter();
-  const { status } = useAuth();
-  const { activeContextId, hydrated } = useContextStore();
+type Item = {
+  id: number;
+  name: string;
+  skinId: any;
+  order?: number;
+  isDeleted: boolean;
+  isArchived: boolean;
+};
 
-  const [serverStatus, setServerStatus] = useState<"checking" | "up" | "down">("checking");
-  const [email, setEmail] = useState("");
-  const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [error, setError] = useState("");
+export default function Contexts() {
+  const { contexts, activeContextId, switchContext, createContext } = useContextStore();
 
-  // ✅ DEV MODE: ensure a valid JWT exists (refresh if expired)
-  const [devReady, setDevReady] = useState(!DEV_BYPASS_AUTH);
+  console.log("🔥 RUNNING app/index.tsx");
+
+  // When null: "closed mode" (carousel centered-ish, minimal cards)
+  // When id:   "open mode"   (carousel docked top, show context header + personas area)
+  const [openContextId, setOpenContextId] = useState<number | null>(null);
+  const isOpen = openContextId !== null;
+  const selectedId = openContextId ?? activeContextId;
+
+  const visible = useMemo(
+    () =>
+      contexts
+        .filter((c) => !c.isDeleted && !c.isArchived)
+        .sort((a, b) => (a.order ?? 999) - (b.order ?? 999)),
+    [contexts]
+  );
+
+  // Sentinel list: [last, ...visible, first]
+  const data = useMemo(() => {
+    if (visible.length <= 1) return visible;
+    const first = visible[0];
+    const last = visible[visible.length - 1];
+    return [last, ...visible, first];
+  }, [visible]);
+
+  // Chrome skin uses the currently selected context (open) or active context (closed)
+  const chromeSkin =
+    SkinRegistry[(visible.find((c) => c.id === selectedId)?.skinId ?? "simple") as any];
+
+  const listRef = useRef<Animated.FlatList<Item>>(null);
+  const scrollX = useRef(new Animated.Value(0)).current;
+
+  // Dock animation: carousel sits more centrally when closed, moves up when open
+  const dockY = useRef(new Animated.Value(0)).current; // 0 closed, 1 open
   useEffect(() => {
-    if (!DEV_BYPASS_AUTH) return;
+    Animated.timing(dockY, {
+      toValue: isOpen ? 1 : 0,
+      duration: 260,
+      useNativeDriver: true,
+    }).start();
+  }, [isOpen, dockY]);
 
-    (async () => {
-      try {
-        await ensureDevJwt();
-        setDevReady(true);
-      } catch (e: any) {
-        console.log("❌ ensureDevJwt failed:", e?.message || e);
-        setDevReady(false);
-      }
-    })();
-  }, []);
+  const dockTranslateY = dockY.interpolate({
+    inputRange: [0, 1],
+    outputRange: [Math.max(80, Math.round(SCREEN_H * 0.16)), 0], // tweak to taste
+    extrapolate: "clamp",
+  });
 
-  useEffect(() => {
-    const checkServer = async () => {
-      try {
-        const res = await fetch("https://veemee.onrender.com/api/ping");
-        setServerStatus(res.ok ? "up" : "down");
-      } catch {
-        setServerStatus("down");
-      }
-    };
+  const minimal = !isOpen;
 
-    checkServer();
-    const interval = setInterval(checkServer, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  // ✅ Intro header: first entry only, fades away, never when open, never again on back
+  const [showIntroHeader, setShowIntroHeader] = useState(false);
+  const introOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(animation, { toValue: 1.06, duration: 1400, useNativeDriver: true }),
-        Animated.timing(animation, { toValue: 1, duration: 1400, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [animation]);
+    if (hasShownContextsIntroHeader) return;
 
-  const isAuthed = DEV_BYPASS_AUTH ? devReady : status === "authenticated";
+    hasShownContextsIntroHeader = true;
 
-  const handleTap = () => {
-    if (!isAuthed) return;
-    if (!hydrated) return;
+    setShowIntroHeader(true);
+    introOpacity.setValue(1);
 
-    router.replace(activeContextId ? "/dashboard" : "/contexts");
+    Animated.timing(introOpacity, {
+      toValue: 0,
+      duration: 1400,
+      delay: 900,
+      useNativeDriver: true,
+    }).start(() => {
+      setShowIntroHeader(false); // remove completely after fade
+    });
+  }, [introOpacity]);
+
+  useEffect(() => {
+    // If user opens a context, hide the intro header immediately
+    if (isOpen && showIntroHeader) {
+      setShowIntroHeader(false);
+      introOpacity.setValue(0);
+    }
+  }, [isOpen, showIntroHeader, introOpacity]);
+
+  const jumpToIndex = (index: number) => {
+    // IMPORTANT: include SIDE padding in the offset
+    const offset = SIDE + SNAP * index;
+    listRef.current?.scrollToOffset({ offset, animated: false });
   };
 
-  const handleSend = async () => {
-    if (!email.includes("@")) {
-      setError("Please enter a valid email");
+  const selectByDataIndex = (dataIndex: number) => {
+    const item = (data as any[])[dataIndex] as Item | undefined;
+    if (!item) return;
+
+    // swipe selects context
+    switchContext(item.id);
+
+    // if panel is open, keep it showing the swiped-to context
+    if (isOpen) setOpenContextId(item.id);
+  };
+
+  const handleMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (visible.length <= 1) {
+      const only = visible[0];
+      if (only) {
+        switchContext(only.id);
+        if (isOpen) setOpenContextId(only.id);
+      }
       return;
     }
 
-    setSendStatus("sending");
-    setError("");
+    const x = e.nativeEvent.contentOffset.x;
 
-    try {
-      const res = await fetch("https://veemee.onrender.com/api/auth/magic-link", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-KEY": "jonnose_pk_99",
-        },
-        body: JSON.stringify({ email, platform: "mobile" }),
-      });
+    const effectiveX = Math.max(0, x - SIDE);
+    const i = Math.floor((effectiveX + SNAP / 2) / SNAP);
 
-      const data = await res.json();
-      if (res.ok) setSendStatus("sent");
-      else {
-        setError(data.error || "Failed to send link");
-        setSendStatus("idle");
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Network error");
-      setSendStatus("idle");
+    const lastRealIndex = visible.length;
+    const trailingSentinelIndex = lastRealIndex + 1;
+
+    if (i === 0) {
+      jumpToIndex(lastRealIndex);
+      selectByDataIndex(lastRealIndex);
+      return;
     }
+
+    if (i === trailingSentinelIndex) {
+      jumpToIndex(1);
+      selectByDataIndex(1);
+      return;
+    }
+
+    selectByDataIndex(i);
   };
 
+  // Tap = open/close only (swipe selects)
+  const onPick = (id: number) => {
+    const current = selectedId;
+
+    if (isOpen) {
+      setOpenContextId(null);
+      return;
+    }
+
+    // only open the currently selected card
+    if (id !== current) return;
+
+    setOpenContextId(current ?? id);
+  };
+
+  // Handle adding a context and opening it (even if createContext doesn't return an id)
+  const pendingOpenNew = useRef(false);
+  const prevVisibleCount = useRef(visible.length);
+
+  useEffect(() => {
+    if (!pendingOpenNew.current) {
+      prevVisibleCount.current = visible.length;
+      return;
+    }
+
+    // Wait for store to update, then open the newest visible context (last by order)
+    if (visible.length > prevVisibleCount.current) {
+      const newest = visible[visible.length - 1];
+      if (newest) {
+        switchContext(newest.id);
+        setOpenContextId(newest.id);
+      }
+      pendingOpenNew.current = false;
+    }
+
+    prevVisibleCount.current = visible.length;
+  }, [visible, switchContext]);
+
+  const onAdd = () => {
+    pendingOpenNew.current = true;
+    createContext({ name: "New context", skinId: "simple" });
+  };
+
+  const openContext = openContextId ? visible.find((c) => c.id === openContextId) : null;
+
   return (
-    <View style={{ flex: 1, backgroundColor: skin.background }}>
-      <Stack.Screen options={{ headerShown: false }} />
+    <>
+      <Stack.Screen options={{ title: "Contexts", headerShown: false }} />
 
-      <TouchableWithoutFeedback onPress={handleTap}>
-        <KeyboardAvoidingView
-          style={[styles.container, { backgroundColor: skin.background }]}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Animated.View
-            style={[
-              styles.circle,
-              {
-                backgroundColor: skin.surface,
-                transform: [{ scale: animation }],
-              },
-            ]}
+      <View style={[styles.screen, { backgroundColor: chromeSkin.background }]}>
+        {/* ✅ Intro header: only on first entry, fades, never when open */}
+        {showIntroHeader && !isOpen && (
+          <Animated.View style={[styles.header, { opacity: introOpacity }]}>
+            <Text style={[styles.title, { color: chromeSkin.text }]}>Contexts</Text>
+          </Animated.View>
+        )}
+
+        {/* Carousel dock stays above openArea */}
+        <Animated.View style={{ transform: [{ translateY: dockTranslateY }] }}>
+          <Animated.FlatList
+            ref={listRef}
+            data={data as any}
+            keyExtractor={(item, idx) => `${item.id}-${idx}`}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            snapToInterval={SNAP}
+            decelerationRate="fast"
+            bounces={false}
+            onMomentumScrollEnd={handleMomentumEnd}
+            initialScrollIndex={visible.length > 1 ? 1 : 0}
+            getItemLayout={(_, index) => ({
+              length: SNAP,
+              offset: SIDE + SNAP * index,
+              index,
+            })}
+            onScrollToIndexFailed={() => {
+              requestAnimationFrame(() => {
+                if (visible.length > 1) jumpToIndex(1);
+              });
+            }}
+            contentContainerStyle={{
+              paddingHorizontal: SIDE,
+              paddingVertical: minimal ? 6 : 10,
+            }}
+            ItemSeparatorComponent={() => <View style={{ width: GAP }} />}
+            onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
+              useNativeDriver: true,
+            })}
+            scrollEventThrottle={16}
+            renderItem={({ item, index }) => {
+              const skin = SkinRegistry[item.skinId];
+              const cardHeight = isOpen ? openCardHeight : closedCardHeight;
+
+              const inputRange = [(index - 1) * SNAP, index * SNAP, (index + 1) * SNAP];
+
+              const scale = scrollX.interpolate({
+                inputRange,
+                outputRange: [0.96, 1.0, 0.96],
+                extrapolate: "clamp",
+              });
+
+              const opacity = scrollX.interpolate({
+                inputRange,
+                outputRange: [0.72, 1.0, 0.72],
+                extrapolate: "clamp",
+              });
+
+              return (
+                <Animated.View style={[styles.card, { transform: [{ scale }], opacity }]}>
+                  <Pressable
+                    onPress={() => onPick(item.id)}
+                    style={[
+                      styles.cardInner,
+                      {
+                        // palette-aware “surface” and border
+                        backgroundColor: skin.surface ?? skin.background,
+                        minHeight: cardHeight,
+                        justifyContent: "center",
+                        padding: isOpen ? 12 : 18,
+                        borderRadius: isOpen ? 16 : 22,
+                        borderWidth: 2,
+                        borderColor: skin.muted ?? skin.text,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.cardTitleMinimal,
+                        {
+                          color: skin.text,
+                          fontSize: isOpen ? 18 : 28,
+                          textAlign: "center",
+                        },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.name}
+                    </Text>
+                  </Pressable>
+                </Animated.View>
+              );
+            }}
           />
+        </Animated.View>
 
-          <Text style={[styles.message, { color: skin.text }]}>
-            {!hydrated
-              ? "Waking up…"
-              : isAuthed
-              ? activeContextId
-                ? "Click to continue"
-                : "Choose a context"
-              : DEV_BYPASS_AUTH
-              ? "Dev auth failed (no JWT). Check ALLOW_DEV_AUTH + API key."
-              : "Enter email to continue"}
-          </Text>
+        {isOpen && (
+          <View style={styles.openArea}>
+            <View style={[styles.openHeaderPill, { backgroundColor: chromeSkin.surface }]}>
+              <View style={[styles.openHeaderDot, { backgroundColor: chromeSkin.accent }]} />
+              <Text style={[styles.openHeaderText, { color: chromeSkin.text }]}>
+                {openContext?.name ?? "Context"}
+              </Text>
+            </View>
 
-          {/* Prod auth UI */}
-          {!DEV_BYPASS_AUTH && status === "unauthenticated" && (
-            <>
-              <TextInput
-                style={[styles.input, { borderColor: "rgba(255,255,255,0.18)", color: skin.text }]}
-                placeholder="Enter your email"
-                placeholderTextColor={skin.muted}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                value={email}
-                onChangeText={setEmail}
-              />
+            <View
+              style={[
+                styles.personaPanel,
+                { backgroundColor: chromeSkin.surface ?? "rgba(255,255,255,0.06)" },
+              ]}
+            >
+              <Text style={{ color: chromeSkin.muted }}>
+                Personas go here (list/grid/flower/house later).
+              </Text>
+            </View>
+          </View>
+        )}
 
-              <TouchableOpacity
-                style={[styles.button, { backgroundColor: skin.accent }]}
-                onPress={handleSend}
-                disabled={sendStatus === "sending"}
-              >
-                <Text style={[styles.buttonText, { color: "#0B0C10", fontWeight: "800" }]}>
-                  {sendStatus === "sending" ? "Sending…" : "Send Magic Link"}
-                </Text>
-              </TouchableOpacity>
-
-              {sendStatus === "sent" && <Text style={[styles.success, { color: skin.accent }]}>✅ Magic link sent!</Text>}
-              {error !== "" && <Text style={styles.error}>❌ {error}</Text>}
-            </>
-          )}
-        </KeyboardAvoidingView>
-      </TouchableWithoutFeedback>
-
-      <View style={[styles.statusContainer, { backgroundColor: "rgba(20,22,29,0.9)" }]}>
-        <View
-          style={[
-            styles.statusDot,
-            { backgroundColor: serverStatus === "up" ? "green" : serverStatus === "down" ? "red" : "gray" },
-          ]}
-        />
-        <Text style={[styles.statusText, { color: skin.muted }]}>
-          Veemee server: {serverStatus === "checking" ? "Checking…" : serverStatus === "up" ? "Up" : "Down"}
-        </Text>
+        {/* Floating Add Context button */}
+        <Pressable onPress={onAdd} style={[styles.fab, { backgroundColor: chromeSkin.accent }]}>
+          <Text style={styles.fabPlus}>+</Text>
+        </Pressable>
       </View>
-    </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 20 },
-  circle: { width: 140, height: 140, borderRadius: 70, marginBottom: 30 },
-  message: { fontSize: 18, marginBottom: 20 },
-  input: { width: "100%", padding: 14, fontSize: 16, borderWidth: 1, borderRadius: 10, marginBottom: 12 },
-  button: { paddingVertical: 12, paddingHorizontal: 30, borderRadius: 10 },
-  buttonText: { fontSize: 16 },
-  success: { marginTop: 20, fontSize: 16 },
-  error: { marginTop: 20, color: "red", fontSize: 16 },
-  statusContainer: {
-    position: "absolute",
-    bottom: 20,
-    alignSelf: "center",
+  screen: { flex: 1, paddingTop: 64 },
+
+  header: { paddingHorizontal: 16, paddingBottom: 10 },
+  title: { fontSize: 18, fontWeight: "700" },
+
+  card: { width: CARD_W },
+  cardInner: {
+    borderRadius: 22,
+    overflow: "hidden",
+    padding: 18,
+  },
+  cardTitleMinimal: {
+    fontWeight: "900",
+    textAlign: "center",
+  },
+
+  openHeaderPill: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 3,
+    alignSelf: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    gap: 10,
+    marginBottom: 12,
   },
-  statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
-  statusText: { fontSize: 14 },
+  openHeaderDot: { width: 10, height: 10, borderRadius: 5 },
+  openHeaderText: { fontSize: 16, fontWeight: "900" },
+
+  openArea: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+  },
+
+  personaPanel: {
+    flex: 1,
+    borderRadius: 18,
+    padding: 16,
+  },
+
+  fab: {
+    position: "absolute",
+    right: 20,
+    bottom: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  fabPlus: {
+    fontSize: 32,
+    fontWeight: "900",
+    color: "#0B0C10",
+    lineHeight: 34,
+  },
 });
