@@ -89,9 +89,6 @@ export function CardRep({ name, skin, open }: CardArgs) {
   );
 }
 
-// Convenience alias if your router expects a generic name
-export const renderCard = BloomCardRep;
-
 const styles = StyleSheet.create({
   root: { flex: 1, minHeight: 1 },
   layer: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
