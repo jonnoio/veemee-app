@@ -1,7 +1,7 @@
 import type { SkinId } from "@/state/ContextStore";
 import { useContextStore } from "@/state/ContextStore";
 import { SkinRegistry } from "@/state/skins";
-import { showClosedContext, showOpenContext } from "@/state/skins/skinCardRep";
+import { ContextCardRep } from "@/state/skins/skinCardRep";
 import { Ionicons } from "@expo/vector-icons";
 import { Stack, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -286,8 +286,6 @@ export default function Contexts() {
             })}
             scrollEventThrottle={16}
             renderItem={({ item, index }) => {
-              // ✅ safe skin lookup (prevents undefined crashes)
-              const skin = SkinRegistry[item.skinId] ?? SkinRegistry.simple;
 
               const cardHeight = isOpen ? openCardHeight : closedCardHeight;
               const inputRange = [(index - 1) * SNAP, index * SNAP, (index + 1) * SNAP];
@@ -303,6 +301,7 @@ export default function Contexts() {
                 outputRange: [0.72, 1.0, 0.72],
                 extrapolate: "clamp",
               });
+              const skin = SkinRegistry[item.skinId] ?? SkinRegistry.simple;
 
               return (
                 <Animated.View style={[styles.card, { transform: [{ scale }], opacity }]}>
@@ -311,24 +310,21 @@ export default function Contexts() {
                     style={[
                       styles.cardInner,
                       {
+                        backgroundColor: skin.surface ?? skin.background,
                         minHeight: cardHeight,
+                        justifyContent: "center",
                         padding: isOpen ? 12 : 18,
                         borderRadius: isOpen ? 16 : 22,
-
-                        // palette-aware surface + border
-                        backgroundColor: skin.surface ?? skin.background,
                         borderWidth: 2,
                         borderColor: skin.muted ?? skin.text,
-                        justifyContent: "center",
                       },
                     ]}
                   >
-                    {isOpen
-                      ? showOpenContext({ skin, name: item.name, isOpen: true })
-                      : showClosedContext({ skin, name: item.name, isOpen: false })}
+                    <ContextCardRep skin={skin} name={item.name} open={isOpen} />
                   </Pressable>
                 </Animated.View>
               );
+
             }}
           />
         </Animated.View>

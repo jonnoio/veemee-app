@@ -3,18 +3,9 @@ import type { Skin } from "@/state/skins";
 import React, { useEffect, useRef } from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
 
-export type CardItem = { name: string };
-export type CardArgs = { item: CardItem; skin: Skin };
+export type CardArgs = { name: string; skin: Skin; open: boolean };
 
-export function showClosedContext({ item, skin }: CardArgs) {
-  return showClosedBoxes({ item, skin });
-}
-
-export function showOpenContext({ item, skin }: CardArgs) {
-  return showOpenBoxes({ item, skin });
-}
-
-export function showClosedBoxes({ item, skin }: CardArgs) {
+function Closed({ name, skin }: { name: string; skin: Skin }) {
   return (
     <View style={styles.wrap}>
       <View style={styles.boxRow}>
@@ -22,48 +13,37 @@ export function showClosedBoxes({ item, skin }: CardArgs) {
         <View style={[styles.box, { backgroundColor: skin.accent, opacity: 0.12 }]} />
         <View style={[styles.box, { backgroundColor: skin.accent, opacity: 0.08 }]} />
       </View>
-
       <Text style={[styles.titleClosed, { color: skin.text }]} numberOfLines={1}>
-        {item.name}
+        {name}
       </Text>
     </View>
   );
 }
 
-export function showOpenBoxes({ item, skin }: CardArgs) {
+function Open({ name, skin }: { name: string; skin: Skin }) {
   return (
     <View style={styles.wrap}>
       <View style={styles.boxRowOpen}>
         <View style={[styles.boxOpen, { backgroundColor: skin.accent, opacity: 0.18 }]} />
         <View style={[styles.boxOpen, { backgroundColor: skin.accent, opacity: 0.10 }]} />
       </View>
-
       <Text style={[styles.titleOpen, { color: skin.text }]} numberOfLines={1}>
-        {item.name}
+        {name}
       </Text>
     </View>
   );
 }
 
-// Keep this if you like having the fade/replace live inside the rep
-export function CardRepSwap({
-  item,
-  skin,
-  isOpenMode,
-}: {
-  item: CardItem;
-  skin: Skin;
-  isOpenMode: boolean;
-}) {
-  const t = useRef(new Animated.Value(isOpenMode ? 1 : 0)).current;
+export function CardRep({ name, skin, open }: CardArgs) {
+  const t = useRef(new Animated.Value(open ? 1 : 0)).current;
 
   useEffect(() => {
     Animated.timing(t, {
-      toValue: isOpenMode ? 1 : 0,
+      toValue: open ? 1 : 0,
       duration: 220,
       useNativeDriver: true,
     }).start();
-  }, [isOpenMode, t]);
+  }, [open, t]);
 
   const closedOpacity = t.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
   const openOpacity = t.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
@@ -71,10 +51,10 @@ export function CardRepSwap({
   return (
     <View style={{ flex: 1 }}>
       <Animated.View style={[styles.layer, { opacity: closedOpacity }]}>
-        {showClosedContext({ item, skin })}
+        <Closed name={name} skin={skin} />
       </Animated.View>
       <Animated.View style={[styles.layer, { opacity: openOpacity }]}>
-        {showOpenContext({ item, skin })}
+        <Open name={name} skin={skin} />
       </Animated.View>
     </View>
   );
