@@ -17,7 +17,7 @@ export type CardArgs = {
  *
  * IMPORTANT: This is a React component (so hooks are valid).
  */
-export function BloomCardRep({ name, skin, open }: CardArgs) {
+export function CardRep({ name, skin, open }: CardArgs) {
   const t = useRef(new Animated.Value(open ? 1 : 0)).current;
 
   useEffect(() => {
