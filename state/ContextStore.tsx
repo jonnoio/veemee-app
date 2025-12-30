@@ -79,9 +79,8 @@ function loadingSeed(): ContextRow[] {
 
 function seed(): ContextRow[] {
   return [
-    { id: 1, name: "World", skinId: "tide", isArchived: false, isDeleted: false, order: 1 },
-    { id: 2, name: "Weekday", skinId: "geo", isArchived: false, isDeleted: false, order: 2 },
-    { id: 3, name: "Weekend", skinId: "simple", isArchived: false, isDeleted: false, order: 3 },
+    { id: 1, name: "Test 1", skinId: "tide", isArchived: false, isDeleted: false, order: 1 },
+    { id: 2, name: "Test 2", skinId: "geo", isArchived: false, isDeleted: false, order: 2 },
   ];
 }
 
@@ -154,9 +153,12 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
   // Personas cache
   const [personasByContextId, setPersonasByContextId] = useState<Record<number, Persona[]>>({});
   const [personasFetchedAt, setPersonasFetchedAt] = useState<Record<number, number>>({});
-  const [personasLoadingByContextId, setPersonasLoadingByContextId] = useState<Record<number, boolean>>({});
+  const [personasLoadingByContextId, setPersonasLoadingByContextId] = useState<Record<number, boolean>>(
+    {}
+  );
 
-  const getVisible = (all: ContextRow[]) => all.filter((c) => !c.isDeleted && !c.isArchived);
+  // ✅ ignore placeholder rows (id <= 0) in "visible" logic
+  const getVisible = (all: ContextRow[]) => all.filter((c) => c.id > 0 && !c.isDeleted && !c.isArchived);
 
   const getFallbackId = (all: ContextRow[]) => {
     const v = getVisible(all).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
@@ -188,7 +190,12 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     (async () => {
       try {
         const jwt = await SecureStore.getItemAsync("veemee-jwt");
-        if (!jwt) return; // keep seed()
+
+        // ✅ IMPORTANT: if no JWT, replace Loading… with local seed so we don't get stuck
+        if (!jwt) {
+          setContexts(seed());
+          return;
+        }
 
         const res = await fetch(`${API_BASE}/api/contexts`, {
           headers: { Authorization: `Bearer ${jwt}` },
@@ -197,7 +204,11 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
         const text = await res.text();
         const data = JSON.parse(text);
 
-        if (!Array.isArray(data.contexts)) return;
+        // ✅ if backend returns something unexpected, fall back to seed
+        if (!Array.isArray(data.contexts)) {
+          setContexts(seed());
+          return;
+        }
 
         const mapped: ContextRow[] = data.contexts.map(mapApiContext);
         mapped.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
@@ -209,7 +220,8 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
           return null; // keep forcing a choice
         });
       } catch {
-        // silent fallback to seed()
+        // ✅ also fall back on any error
+        setContexts(seed());
       }
     })();
   }, []);
@@ -219,7 +231,7 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     if (!hydrated) return;
     if (activeContextId == null) return;
 
-    const ok = contexts.some((c) => c.id === activeContextId && !c.isDeleted && !c.isArchived);
+    const ok = contexts.some((c) => c.id === activeContextId && c.id > 0 && !c.isDeleted && !c.isArchived);
     if (!ok) setActiveContextId(getFallbackId(contexts));
   }, [contexts, activeContextId, hydrated]);
 
@@ -245,9 +257,9 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     [contexts, activeContextId]
   );
 
-  // ✅ single implementation (no duplicates)
+  // single implementation (no duplicates)
   const fetchPersonasForContext = async (contextId: number, opts?: { force?: boolean }) => {
-    if (!contextId) return;
+    if (!contextId || contextId <= 0) return;
 
     const force = !!opts?.force;
     const last = personasFetchedAt[contextId] ?? 0;
@@ -289,7 +301,7 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
 
       switchContext(id) {
         const target = contexts.find((c) => c.id === id);
-        if (!target || target.isDeleted || target.isArchived) return;
+        if (!target || target.id <= 0 || target.isDeleted || target.isArchived) return;
         setActiveContextId(id);
       },
 
@@ -360,7 +372,7 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
         setWastebasketPolicy(p);
       },
 
-      // ✅ exported cache + fetchers
+      // exported cache + fetchers
       personasByContextId,
       personasFetchedAt,
       personasLoadingByContextId,

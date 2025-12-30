@@ -1,5 +1,7 @@
+import type { SkinId } from "@/state/ContextStore";
 import { useContextStore } from "@/state/ContextStore";
 import { SkinRegistry } from "@/state/skins";
+import { showClosedContext, showOpenContext } from "@/state/skins/skinCardRep";
 import { Ionicons } from "@expo/vector-icons";
 import { Stack, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -31,7 +33,7 @@ let hasShownContextsIntroHeader = false;
 type Item = {
   id: number;
   name: string;
-  skinId: any;
+  skinId: SkinId;
   order?: number;
   isDeleted: boolean;
   isArchived: boolean;
@@ -55,16 +57,17 @@ export default function Contexts() {
 
   console.log("🔥 RUNNING app/index.tsx");
 
-  // When null: "closed mode" (carousel centered-ish, minimal cards)
-  // When id:   "open mode"   (carousel docked top, show context header + personas area)
+  // When null: "closed mode"
+  // When id:   "open mode"
   const [openContextId, setOpenContextId] = useState<number | null>(null);
   const isOpen = openContextId !== null;
   const selectedId = openContextId ?? activeContextId;
 
+  // ✅ Visible contexts: ignore deleted/archived AND ignore placeholder rows (id <= 0)
   const visible = useMemo(
     () =>
       contexts
-        .filter((c) => !c.isDeleted && !c.isArchived)
+        .filter((c) => c.id > 0 && !c.isDeleted && !c.isArchived)
         .sort((a, b) => (a.order ?? 999) - (b.order ?? 999)),
     [contexts]
   );
@@ -84,13 +87,14 @@ export default function Contexts() {
   }, [visible]);
 
   // Chrome skin uses the currently selected context (open) or active context (closed)
-  const chromeSkin =
-    SkinRegistry[(visible.find((c) => c.id === selectedId)?.skinId ?? "simple") as any];
+  const chromeSkinId: SkinId =
+    (visible.find((c) => c.id === selectedId)?.skinId as SkinId) ?? "simple";
+  const chromeSkin = SkinRegistry[chromeSkinId] ?? SkinRegistry.simple;
 
   const listRef = useRef<Animated.FlatList<Item>>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
 
-  // Dock animation: carousel sits more centrally when closed, moves up when open
+  // Dock animation
   const dockY = useRef(new Animated.Value(0)).current; // 0 closed, 1 open
   useEffect(() => {
     Animated.timing(dockY, {
@@ -116,7 +120,6 @@ export default function Contexts() {
     if (hasShownContextsIntroHeader) return;
 
     hasShownContextsIntroHeader = true;
-
     setShowIntroHeader(true);
     introOpacity.setValue(1);
 
@@ -125,13 +128,10 @@ export default function Contexts() {
       duration: 1400,
       delay: 900,
       useNativeDriver: true,
-    }).start(() => {
-      setShowIntroHeader(false); // remove completely after fade
-    });
+    }).start(() => setShowIntroHeader(false));
   }, [introOpacity]);
 
   useEffect(() => {
-    // If user opens a context, hide the intro header immediately
     if (isOpen && showIntroHeader) {
       setShowIntroHeader(false);
       introOpacity.setValue(0);
@@ -147,10 +147,7 @@ export default function Contexts() {
     const item = (data as any[])[dataIndex] as Item | undefined;
     if (!item) return;
 
-    // swipe selects context
     switchContext(item.id);
-
-    // if panel is open, keep it showing the swiped-to context
     if (isOpen) setOpenContextId(item.id);
   };
 
@@ -165,7 +162,6 @@ export default function Contexts() {
     }
 
     const x = e.nativeEvent.contentOffset.x;
-
     const effectiveX = Math.max(0, x - SIDE);
     const i = Math.floor((effectiveX + SNAP / 2) / SNAP);
 
@@ -196,9 +192,7 @@ export default function Contexts() {
       return;
     }
 
-    // only open the currently selected card
     if (id !== current) return;
-
     setOpenContextId(current ?? id);
   };
 
@@ -235,7 +229,6 @@ export default function Contexts() {
   const personas = openContextId ? personasByContextId[openContextId] ?? [] : [];
   const personasLoading = openContextId ? !!personasLoadingByContextId[openContextId] : false;
 
-  // Ensure current open context is fetched (TTL protected in store)
   useEffect(() => {
     if (!isOpen || !openContextId) return;
     fetchPersonasForContext(openContextId);
@@ -254,7 +247,6 @@ export default function Contexts() {
       <Stack.Screen options={{ title: "Contexts", headerShown: false }} />
 
       <View style={[styles.screen, { backgroundColor: chromeSkin.background }]}>
-        {/* ✅ Intro header: only on first entry, fades, never when open */}
         {showIntroHeader && !isOpen && (
           <Animated.View style={[styles.header, { opacity: introOpacity }]}>
             <Text style={[styles.title, { color: chromeSkin.text }]}>Contexts</Text>
@@ -294,9 +286,10 @@ export default function Contexts() {
             })}
             scrollEventThrottle={16}
             renderItem={({ item, index }) => {
-              const skin = SkinRegistry[item.skinId];
-              const cardHeight = isOpen ? openCardHeight : closedCardHeight;
+              // ✅ safe skin lookup (prevents undefined crashes)
+              const skin = SkinRegistry[item.skinId] ?? SkinRegistry.simple;
 
+              const cardHeight = isOpen ? openCardHeight : closedCardHeight;
               const inputRange = [(index - 1) * SNAP, index * SNAP, (index + 1) * SNAP];
 
               const scale = scrollX.interpolate({
@@ -318,29 +311,21 @@ export default function Contexts() {
                     style={[
                       styles.cardInner,
                       {
-                        backgroundColor: skin.surface ?? skin.background,
                         minHeight: cardHeight,
-                        justifyContent: "center",
                         padding: isOpen ? 12 : 18,
                         borderRadius: isOpen ? 16 : 22,
+
+                        // palette-aware surface + border
+                        backgroundColor: skin.surface ?? skin.background,
                         borderWidth: 2,
                         borderColor: skin.muted ?? skin.text,
+                        justifyContent: "center",
                       },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.cardTitleMinimal,
-                        {
-                          color: skin.text,
-                          fontSize: isOpen ? 18 : 28,
-                          textAlign: "center",
-                        },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {item.name}
-                    </Text>
+                    {isOpen
+                      ? showOpenContext({ skin, name: item.name, isOpen: true })
+                      : showClosedContext({ skin, name: item.name, isOpen: false })}
                   </Pressable>
                 </Animated.View>
               );
@@ -356,7 +341,6 @@ export default function Contexts() {
               { backgroundColor: chromeSkin.surface ?? "rgba(255,255,255,0.06)" },
             ]}
           >
-            {/* Optional: show the open context name pill */}
             <View style={[styles.openHeaderPill, { backgroundColor: chromeSkin.surface }]}>
               <View style={[styles.openHeaderDot, { backgroundColor: chromeSkin.accent }]} />
               <Text style={[styles.openHeaderText, { color: chromeSkin.text }]}>
@@ -391,9 +375,7 @@ export default function Contexts() {
                   </View>
                 )}
                 ListEmptyComponent={
-                  <Text style={{ color: chromeSkin.muted, paddingTop: 14 }}>
-                    No personas yet.
-                  </Text>
+                  <Text style={{ color: chromeSkin.muted, paddingTop: 14 }}>No personas yet.</Text>
                 }
               />
             )}
@@ -417,13 +399,7 @@ const styles = StyleSheet.create({
 
   card: { width: CARD_W },
   cardInner: {
-    borderRadius: 22,
     overflow: "hidden",
-    padding: 18,
-  },
-  cardTitleMinimal: {
-    fontWeight: "900",
-    textAlign: "center",
   },
 
   openHeaderPill: {
@@ -454,9 +430,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 10,
   },
-  personaIconBtn: {
-    padding: 8,
-  },
+  personaIconBtn: { padding: 8 },
 
   fab: {
     position: "absolute",

@@ -7,7 +7,7 @@
     "icon": "./assets/images/veemee.png",
     "scheme": "veemeeapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.interorbis.veemeeapp",

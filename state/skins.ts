@@ -1,5 +1,5 @@
+import type { SkinId } from "@/state/ContextStore";
 import { Easing } from "react-native";
-import type { SkinId } from "./ContextStore";
 
 export type MotionPreset = {
   bloomDurationMs: number;
@@ -11,6 +11,8 @@ export type MotionPreset = {
 
 export type BackgroundStyle = "solid" | "grid" | "waves";
 
+export type CardRepresentation = "boxes" | "bloom"; // extend later: | "flower"
+
 export type Skin = {
   background: string;
   surface: string;
@@ -20,6 +22,8 @@ export type Skin = {
 
   motion: MotionPreset;
   backgroundStyle: BackgroundStyle;
+
+  cardRep: CardRepresentation;
 };
 
 export const SkinRegistry: Record<SkinId, Skin> = {
@@ -30,6 +34,7 @@ export const SkinRegistry: Record<SkinId, Skin> = {
     text: "#F2F4F8",
     muted: "#A7B0C0",
     accent: "#7AA2FF",
+    cardRep: "boxes", // ✅
 
     motion: {
       bloomDurationMs: 220,
@@ -49,6 +54,7 @@ export const SkinRegistry: Record<SkinId, Skin> = {
     text: "#EAF0FF",
     muted: "rgba(234,240,255,0.62)",
     accent: "#6CF0C2",
+    cardRep: "boxes", // ✅
 
     motion: {
       bloomDurationMs: 160,
@@ -68,6 +74,7 @@ export const SkinRegistry: Record<SkinId, Skin> = {
     text: "#EAF6FF",
     muted: "rgba(234,246,255,0.62)",
     accent: "#FFB86B",
+    cardRep: "boxes", // ✅
 
     motion: {
       bloomDurationMs: 320,
