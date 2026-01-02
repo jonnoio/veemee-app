@@ -2,7 +2,7 @@
   "expo": {
     "name": "veemee-app",
     "slug": "veemee-app",
-    "version": "1.0.0",
+    "version": "0.98.1",
     "orientation": "portrait",
     "icon": "./assets/images/veemee.png",
     "scheme": "veemeeapp",
