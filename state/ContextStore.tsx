@@ -26,14 +26,18 @@ export type Persona = {
 export type WastebasketPolicy = { retentionDays: number | null };
 
 const API_BASE = "https://veemee.onrender.com";
+const ACTIVE_CONTEXT_KEY = "veemee-active-context-id";
+const nowIso = () => new Date().toISOString();
 
 type Store = {
-  hydrated: boolean;
+  // auth/bootstrap
+  hydrated: boolean; // SecureStore read finished (at least active context id)
+  hasJwt: boolean; // JWT exists in SecureStore (as last checked)
 
+  // contexts
   activeContextId: number | null;
   contexts: ContextRow[];
   wastebasketPolicy: WastebasketPolicy;
-
   activeContext: ContextRow | null;
 
   switchContext(id: number): void;
@@ -50,7 +54,7 @@ type Store = {
 
   setWastebasketPolicy(p: WastebasketPolicy): void;
 
-  // Personas cache (per context)
+  // personas cache (per context)
   personasByContextId: Record<number, Persona[]>;
   personasFetchedAt: Record<number, number>;
   personasLoadingByContextId: Record<number, boolean>;
@@ -60,9 +64,6 @@ type Store = {
 };
 
 const Ctx = createContext<Store | null>(null);
-
-const ACTIVE_CONTEXT_KEY = "veemee-active-context-id";
-const nowIso = () => new Date().toISOString();
 
 function loadingSeed(): ContextRow[] {
   return [
@@ -77,6 +78,7 @@ function loadingSeed(): ContextRow[] {
   ];
 }
 
+// Optional local fallback (handy during dev / signed-out)
 function seed(): ContextRow[] {
   return [
     { id: 1, name: "Test 1", skinId: "tide", isArchived: false, isDeleted: false, order: 1 },
@@ -93,7 +95,6 @@ type ApiContext = {
   skin_id?: SkinId;
   order?: number;
   sort_order?: number;
-  is_default?: boolean;
 };
 
 function mapApiContext(c: ApiContext): ContextRow {
@@ -101,7 +102,7 @@ function mapApiContext(c: ApiContext): ContextRow {
     id: c.id,
     name: (c.name ?? c.display_name ?? c.handle ?? `Context ${c.id}`) as string,
     skinId: (c.skinId ?? c.skin_id ?? "simple") as SkinId,
-    order: (c.order ?? c.sort_order ?? undefined) as any,
+    order: (c.order ?? c.sort_order ?? undefined) as number | undefined,
     isArchived: false,
     isDeleted: false,
   };
@@ -146,6 +147,8 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
   const [activeContextId, setActiveContextId] = useState<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
+  const [hasJwt, setHasJwt] = useState(false);
+
   const [wastebasketPolicy, setWastebasketPolicy] = useState<WastebasketPolicy>({
     retentionDays: null,
   });
@@ -165,12 +168,11 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     return v.length ? v[0].id : null;
   };
 
-  // hydrate activeContextId once
+  // Hydrate activeContextId once
   useEffect(() => {
     (async () => {
       try {
         const raw = await SecureStore.getItemAsync(ACTIVE_CONTEXT_KEY);
-
         if (raw) {
           const id = Number(raw);
           setActiveContextId(Number.isNaN(id) ? null : id);
@@ -185,15 +187,16 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     })();
   }, []);
 
-  // hydrate contexts from backend
+  // Hydrate contexts from backend (and check JWT existence)
   useEffect(() => {
     (async () => {
       try {
         const jwt = await SecureStore.getItemAsync("veemee-jwt");
+        setHasJwt(!!jwt);
 
-        // ✅ IMPORTANT: if no JWT, replace Loading… with local seed so we don't get stuck
+        // If no JWT, don’t call API
         if (!jwt) {
-          setContexts(seed());
+          setContexts(seed()); // or [] if you prefer “blank signed out”
           return;
         }
 
@@ -204,7 +207,6 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
         const text = await res.text();
         const data = JSON.parse(text);
 
-        // ✅ if backend returns something unexpected, fall back to seed
         if (!Array.isArray(data.contexts)) {
           setContexts(seed());
           return;
@@ -215,27 +217,29 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
 
         setContexts(mapped);
 
+        // If previous activeContextId no longer exists, clear it (forces a new choice later)
         setActiveContextId((prev) => {
           if (prev != null && mapped.some((c) => c.id === prev)) return prev;
-          return null; // keep forcing a choice
+          return null;
         });
       } catch {
-        // ✅ also fall back on any error
         setContexts(seed());
       }
     })();
   }, []);
 
-  // validate active context whenever contexts change
+  // Validate active context whenever contexts change
   useEffect(() => {
     if (!hydrated) return;
     if (activeContextId == null) return;
 
-    const ok = contexts.some((c) => c.id === activeContextId && c.id > 0 && !c.isDeleted && !c.isArchived);
+    const ok = contexts.some(
+      (c) => c.id === activeContextId && c.id > 0 && !c.isDeleted && !c.isArchived
+    );
     if (!ok) setActiveContextId(getFallbackId(contexts));
   }, [contexts, activeContextId, hydrated]);
 
-  // persist on change
+  // Persist active context on change
   useEffect(() => {
     if (!hydrated) return;
 
@@ -257,7 +261,6 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     [contexts, activeContextId]
   );
 
-  // single implementation (no duplicates)
   const fetchPersonasForContext = async (contextId: number, opts?: { force?: boolean }) => {
     if (!contextId || contextId <= 0) return;
 
@@ -293,6 +296,7 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
   const store: Store = useMemo(
     () => ({
       hydrated,
+      hasJwt,
 
       activeContextId,
       contexts,
@@ -372,7 +376,6 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
         setWastebasketPolicy(p);
       },
 
-      // exported cache + fetchers
       personasByContextId,
       personasFetchedAt,
       personasLoadingByContextId,
@@ -381,6 +384,7 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     }),
     [
       hydrated,
+      hasJwt,
       activeContextId,
       contexts,
       wastebasketPolicy,

@@ -47,8 +47,8 @@ export default function Contexts() {
     activeContextId,
     switchContext,
     createContext,
-
-    // persona cache + prefetch
+    hydrated,
+    hasJwt,
     fetchPersonasForContext,
     prefetchPersonasForContexts,
     personasByContextId,
@@ -57,9 +57,11 @@ export default function Contexts() {
 
   console.log("🔥 RUNNING app/index.tsx");
 
-  // When null: "closed mode"
-  // When id:   "open mode"
+  // ---- local UI state (must be declared unconditionally) ----
   const [openContextId, setOpenContextId] = useState<number | null>(null);
+  const [showIntroHeader, setShowIntroHeader] = useState(false);
+
+  // ---- derived ----
   const isOpen = openContextId !== null;
   const selectedId = openContextId ?? activeContextId;
 
@@ -71,12 +73,6 @@ export default function Contexts() {
         .sort((a, b) => (a.order ?? 999) - (b.order ?? 999)),
     [contexts]
   );
-
-  // ✅ Start warming personas as soon as this screen opens (and when contexts change)
-  useEffect(() => {
-    if (!visible.length) return;
-    prefetchPersonasForContexts(visible.map((c) => c.id));
-  }, [visible, prefetchPersonasForContexts]);
 
   // Sentinel list: [last, ...visible, first]
   const data = useMemo(() => {
@@ -91,11 +87,14 @@ export default function Contexts() {
     (visible.find((c) => c.id === selectedId)?.skinId as SkinId) ?? "simple";
   const chromeSkin = SkinRegistry[chromeSkinId] ?? SkinRegistry.simple;
 
+  // ---- refs/anim ----
   const listRef = useRef<Animated.FlatList<Item>>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
 
-  // Dock animation
   const dockY = useRef(new Animated.Value(0)).current; // 0 closed, 1 open
+  const introOpacity = useRef(new Animated.Value(0)).current;
+
+  // Dock animation
   useEffect(() => {
     Animated.timing(dockY, {
       toValue: isOpen ? 1 : 0,
@@ -112,10 +111,21 @@ export default function Contexts() {
 
   const minimal = !isOpen;
 
-  // ✅ Intro header: first entry only, fades away, never when open, never again on back
-  const [showIntroHeader, setShowIntroHeader] = useState(false);
-  const introOpacity = useRef(new Animated.Value(0)).current;
+  // ---- auth gate ----
+  useEffect(() => {
+    if (!hydrated) return;
+    if (hasJwt) return;
+    router.replace("/auth");
+  }, [hydrated, hasJwt, router]);
 
+  // ---- prefetch personas (only when authed) ----
+  useEffect(() => {
+    if (!hasJwt) return;
+    if (!visible.length) return;
+    prefetchPersonasForContexts(visible.map((c) => c.id));
+  }, [visible, prefetchPersonasForContexts, hasJwt]);
+
+  // ---- intro header ----
   useEffect(() => {
     if (hasShownContextsIntroHeader) return;
 
@@ -138,6 +148,7 @@ export default function Contexts() {
     }
   }, [isOpen, showIntroHeader, introOpacity]);
 
+  // ---- helpers ----
   const jumpToIndex = (index: number) => {
     const offset = SIDE + SNAP * index;
     listRef.current?.scrollToOffset({ offset, animated: false });
@@ -223,16 +234,17 @@ export default function Contexts() {
     createContext({ name: "New context", skinId: "simple" });
   };
 
-  // --- open mode persona data from cache ---
+  // ---- open mode personas ----
   const openContext = openContextId ? visible.find((c) => c.id === openContextId) : null;
 
   const personas = openContextId ? personasByContextId[openContextId] ?? [] : [];
   const personasLoading = openContextId ? !!personasLoadingByContextId[openContextId] : false;
 
   useEffect(() => {
+    if (!hasJwt) return;
     if (!isOpen || !openContextId) return;
     fetchPersonasForContext(openContextId);
-  }, [isOpen, openContextId, fetchPersonasForContext]);
+  }, [hasJwt, isOpen, openContextId, fetchPersonasForContext]);
 
   const handleViewTasks = (personaId: number) => {
     router.push({ pathname: "/tasks", params: { personaId: String(personaId) } } as any);
@@ -241,6 +253,25 @@ export default function Contexts() {
   const handleEditPersona = (personaId: number) => {
     router.push({ pathname: "/persona/[personaId]", params: { personaId: String(personaId) } } as any);
   };
+
+  // ---- render gate (after hooks) ----
+  if (!hydrated) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (!hasJwt) {
+    // Redirect is triggered in useEffect; show a tiny loader here.
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator />
+        <Text style={{ marginTop: 10, opacity: 0.7 }}>Redirecting to sign in…</Text>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -286,7 +317,6 @@ export default function Contexts() {
             })}
             scrollEventThrottle={16}
             renderItem={({ item, index }) => {
-
               const cardHeight = isOpen ? openCardHeight : closedCardHeight;
               const inputRange = [(index - 1) * SNAP, index * SNAP, (index + 1) * SNAP];
 
@@ -301,6 +331,7 @@ export default function Contexts() {
                 outputRange: [0.72, 1.0, 0.72],
                 extrapolate: "clamp",
               });
+
               const skin = SkinRegistry[item.skinId] ?? SkinRegistry.simple;
 
               return (
@@ -324,7 +355,6 @@ export default function Contexts() {
                   </Pressable>
                 </Animated.View>
               );
-
             }}
           />
         </Animated.View>
@@ -394,9 +424,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: "700" },
 
   card: { width: CARD_W },
-  cardInner: {
-    overflow: "hidden",
-  },
+  cardInner: { overflow: "hidden" },
 
   openHeaderPill: {
     flexDirection: "row",
