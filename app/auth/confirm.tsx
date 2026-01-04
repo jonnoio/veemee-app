@@ -27,7 +27,7 @@ export default function ConfirmPage() {
         console.log("🔍 Validating token with backend…");
 
         const res = await fetch('${API_BASE}/api/auth/validate', {
-          method: 'POST',
+            method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token }),
         });
