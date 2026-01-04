@@ -2,7 +2,7 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
-const API_BASE = "https://veemee.onrender.com";
+import { API_BASE } from "@/config/dev";
 
 export default function AuthIndex() {
   const router = useRouter();

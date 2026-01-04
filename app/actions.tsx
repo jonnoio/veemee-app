@@ -22,7 +22,7 @@ type Action = {
   estimated_minutes: number | null;
 };
 
-const API_BASE = 'https://veemee.onrender.com';
+import { API_BASE } from "@/config/dev";
 
 export default function ActionsScreen() {
   const { taskId, personaId } =

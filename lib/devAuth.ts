@@ -40,7 +40,7 @@ export async function ensureDevJwt() {
     await SecureStore.deleteItemAsync("veemee-jwt");
   }
 
-  const res = await fetch("https://veemee.onrender.com/api/auth/dev-jwt", {
+  const res = await fetch("${API_BASE}/api/auth/dev-jwt", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

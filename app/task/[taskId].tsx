@@ -28,7 +28,7 @@ export default function ConfirmPage() {
       try {
         console.log("🔍 Validating token with backend…");
 
-        const res = await fetch("https://veemee.onrender.com/api/auth/validate", {
+        const res = await fetch("${API_BASE}/api/auth/validate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token }),

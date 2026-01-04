@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 
-const API_BASE = 'https://veemee.onrender.com';
+import { API_BASE } from "@/config/dev";
 
 // Define task type
 type Task = {

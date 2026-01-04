@@ -4,11 +4,12 @@ import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { DEV_BYPASS_AUTH } from '@/config/dev';
+import { API_BASE, DEV_BYPASS_AUTH } from '@/config/dev';
 import { useContextStore } from '@/state/ContextStore';
 import { SkinRegistry } from '@/state/skins';
 import { logout } from '../lib/auth';
 import { useAuth } from '../lib/useAuth';
+
 
 type Persona = {
   id: number;
@@ -101,7 +102,7 @@ export default function Dashboard() {
         return;
       }
 
-      const url = `https://veemee.onrender.com/api/contexts/${ctxId}/personas`;
+      const url = `${API_BASE}/api/contexts/${ctxId}/personas`;
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });

@@ -25,7 +25,7 @@ export type Persona = {
 
 export type WastebasketPolicy = { retentionDays: number | null };
 
-const API_BASE = "https://veemee.onrender.com";
+import { API_BASE } from "@/config/dev";
 const ACTIVE_CONTEXT_KEY = "veemee-active-context-id";
 const nowIso = () => new Date().toISOString();
 

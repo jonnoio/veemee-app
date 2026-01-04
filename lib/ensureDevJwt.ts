@@ -11,7 +11,7 @@ export async function ensureDevJwt() {
   console.log("🧪 DEV: minting JWT");
 
   const res = await fetch(
-    "https://veemee.onrender.com/api/auth/dev-jwt",
+    "${API_BASE}/api/auth/dev-jwt",
     {
       method: "POST",
       headers: {
