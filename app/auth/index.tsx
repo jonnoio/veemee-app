@@ -2,7 +2,7 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { API_BASE } from "@/config/dev";
+import { API_BASE } from "@/config/api";
 
 export default function AuthIndex() {
   const router = useRouter();
@@ -51,6 +51,7 @@ export default function AuthIndex() {
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="email-address"
+        placeholderTextColor="#888"
       />
 
       <Pressable style={styles.btn} onPress={send} disabled={busy}>
@@ -67,10 +68,33 @@ export default function AuthIndex() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, padding: 20, paddingTop: 72 },
-  h1: { fontSize: 22, fontWeight: "900" },
-  input: { marginTop: 18, borderWidth: 1, borderRadius: 12, padding: 12 },
-  btn: { marginTop: 14, borderWidth: 1, borderRadius: 12, padding: 12, alignItems: "center" },
-  btnText: { fontWeight: "900" },
-  msg: { marginTop: 14, opacity: 0.8 },
+  wrap: {
+    flex: 1,
+    padding: 20,
+    paddingTop: 72,
+    backgroundColor: "#fff",       // 👈 key fix
+  },
+  h1: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#111",                 // 👈 make it visible
+  },
+  input: {
+    marginTop: 18,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 12,
+    padding: 12,
+    color: "#111",                 // 👈 typed text visible
+  },
+  btn: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: "#111",
+    borderRadius: 12,
+    padding: 12,
+    alignItems: "center",
+  },
+  btnText: { fontWeight: "900", color: "#111" }, // 👈 visible
+  msg: { marginTop: 14, opacity: 0.8, color: "#111" }, // 👈 visible
 });

@@ -22,7 +22,7 @@ type Action = {
   estimated_minutes: number | null;
 };
 
-import { API_BASE } from "@/config/dev";
+import { API_BASE } from "@/config/api";
 
 export default function ActionsScreen() {
   const { taskId, personaId } =

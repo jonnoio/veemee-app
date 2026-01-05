@@ -25,7 +25,7 @@ export type Persona = {
 
 export type WastebasketPolicy = { retentionDays: number | null };
 
-import { API_BASE } from "@/config/dev";
+import { API_BASE } from "@/config/api";
 const ACTIVE_CONTEXT_KEY = "veemee-active-context-id";
 const nowIso = () => new Date().toISOString();
 
@@ -75,14 +75,6 @@ function loadingSeed(): ContextRow[] {
       isDeleted: false,
       order: 0,
     },
-  ];
-}
-
-// Optional local fallback (handy during dev / signed-out)
-function seed(): ContextRow[] {
-  return [
-    { id: 1, name: "Test 1", skinId: "tide", isArchived: false, isDeleted: false, order: 1 },
-    { id: 2, name: "Test 2", skinId: "geo", isArchived: false, isDeleted: false, order: 2 },
   ];
 }
 
@@ -187,16 +179,26 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
     })();
   }, []);
 
-  // Hydrate contexts from backend (and check JWT existence)
+  // --- JWT presence (tracks login/logout) ---
   useEffect(() => {
     (async () => {
       try {
         const jwt = await SecureStore.getItemAsync("veemee-jwt");
         setHasJwt(!!jwt);
+      } catch {
+        setHasJwt(false);
+      }
+    })();
+  }, []);
 
-        // If no JWT, don’t call API
+  // --- Fetch contexts whenever we have a JWT ---
+  useEffect(() => {
+    (async () => {
+      try {
+        const jwt = await SecureStore.getItemAsync("veemee-jwt");
+
         if (!jwt) {
-          setContexts(seed()); // or [] if you prefer “blank signed out”
+          setContexts([]); // signed out: no fake contexts
           return;
         }
 
@@ -205,10 +207,25 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
         });
 
         const text = await res.text();
-        const data = JSON.parse(text);
+
+        if (!res.ok) {
+          console.log("❌ /api/contexts failed", res.status, text.slice(0, 200));
+          setContexts([]);
+          return;
+        }
+
+        let data: any = {};
+        try {
+          data = JSON.parse(text);
+        } catch {
+          console.log("❌ /api/contexts returned non-JSON", text.slice(0, 200));
+          setContexts([]);
+          return;
+        }
 
         if (!Array.isArray(data.contexts)) {
-          setContexts(seed());
+          console.log("❌ /api/contexts unexpected shape", data);
+          setContexts([]);
           return;
         }
 
@@ -217,17 +234,18 @@ export function ContextStoreProvider({ children }: { children: React.ReactNode }
 
         setContexts(mapped);
 
-        // If previous activeContextId no longer exists, clear it (forces a new choice later)
+        // Ensure activeContextId is valid; otherwise pick first visible or null
         setActiveContextId((prev) => {
           if (prev != null && mapped.some((c) => c.id === prev)) return prev;
-          return null;
+          return mapped[0]?.id ?? null;
         });
-      } catch {
-        setContexts(seed());
+      } catch (e) {
+        console.error("❌ contexts fetch error", e);
+        setContexts([]);
       }
     })();
-  }, []);
-
+  }, [hasJwt]);
+  
   // Validate active context whenever contexts change
   useEffect(() => {
     if (!hydrated) return;

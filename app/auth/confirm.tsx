@@ -3,6 +3,8 @@ import * as SecureStore from 'expo-secure-store';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { API_BASE } from "@/config/api";
+
 export default function ConfirmPage() {
   const router = useRouter();
   const { token: rawToken } = useLocalSearchParams();
@@ -26,14 +28,23 @@ export default function ConfirmPage() {
       try {
         console.log("🔍 Validating token with backend…");
 
-        const res = await fetch('${API_BASE}/api/auth/validate', {
+        const res = await fetch(`${API_BASE}/api/auth/validate`, {
             method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token }),
         });
 
-        const data = await res.json();
+        const text = await res.text();
+        console.log("⬅️ validate status:", res.status);
+        console.log("⬅️ validate body:", text);
 
+        let data: any = {};
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { error: text };
+        }
+        
         if (data.jwt) {
           await SecureStore.setItemAsync('veemee-jwt', data.jwt);
           console.log("💾 JWT stored in SecureStore");

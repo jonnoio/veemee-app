@@ -12,6 +12,7 @@ export function useAuth() {
     const checkToken = async () => {
       try {
         const token = await SecureStore.getItemAsync('veemee-jwt');
+        console.log("🔐 token present?", !!token, "len:", token?.length);
         if (!token) {
           console.log('❌ No token found');
           setStatus('unauthenticated');
@@ -35,6 +36,11 @@ export function useAuth() {
           setEmail(decoded.email);
           setStatus('authenticated');
         }
+
+        const nowIso = new Date().toISOString();
+        const expIso = decoded?.exp ? new Date(decoded.exp * 1000).toISOString() : "no exp";
+        console.log("🕒 now:", nowIso, "exp:", expIso);
+
       } catch (err) {
         console.log('❌ Error decoding token:', err);
         setStatus('unauthenticated');

@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { API_BASE, DEV_BYPASS_AUTH } from '@/config/dev';
+import { API_BASE } from '@/config/api';
 import { useContextStore } from '@/state/ContextStore';
 import { SkinRegistry } from '@/state/skins';
 import { logout } from '../lib/auth';
@@ -90,30 +90,47 @@ export default function Dashboard() {
         return;
       }
 
-      // DEV_BYPASS_AUTH should only bypass *login*, not data fetching.
-      // But while you're still wiring, we can allow it to fall through:
-      // if there is a token, use it; if not, just skip.
-      const token = await SecureStore.getItemAsync('veemee-jwt');
-      console.log('📦 JWT used for fetch:', token);
-
+      const token = await SecureStore.getItemAsync("veemee-jwt");
+      console.log("📦 JWT present:", !!token);
       if (!token) {
-        console.log('⚠️ No JWT yet, skipping personas fetch.');
         setPersonas([]);
         return;
       }
 
-      const url = `${API_BASE}/api/contexts/${ctxId}/personas`;
+      const url = `${API_BASE}/api/contexts/${ctxId}/personas`; // ✅ put back
+      console.log("🌍 fetching personas:", url);
+
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      if (res.status === 401) {
+        const text401 = await res.text();
+        let data401: any = {};
+        try { data401 = JSON.parse(text401); } catch {}
+
+        console.log("🚫 401 from", url, "body:", text401);
+
+        // Only wipe token if backend explicitly says it's expired/invalid
+        const msg = (data401?.error || "").toLowerCase();
+        if (msg.includes("expired") || msg.includes("invalid") || msg.includes("signature")) {
+          await SecureStore.deleteItemAsync("veemee-jwt");
+        }
+
+        setPersonas([]);
+        router.replace("/auth");
+        return;
+      }
+
       const text = await res.text();
       console.log('🧾 Raw response:', text);
 
-      const data = JSON.parse(text);
-      console.log('✅ Parsed JSON:', data);
+      let data: any = {};
+      try { data = JSON.parse(text); }
+      catch { throw new Error(`Non-JSON response (HTTP ${res.status})`); }
 
       setPersonas(data.personas || []);
+
     } catch (err) {
       console.error('🔥 Fetch failed:', err);
       setPersonas([]);
@@ -121,10 +138,17 @@ export default function Dashboard() {
   }, [activeContext?.id]);
 
   useEffect(() => {
+    if (status === "unauthenticated") {
+      router.replace("/auth");
+    }
+  }, [status, router]);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
     fetchPersonas();
     const interval = setInterval(fetchPersonas, 30000);
     return () => clearInterval(interval);
-  }, [activeContext?.id, fetchPersonas]);
+  }, [status, activeContext?.id, fetchPersonas]);
 
   if (status === 'loading') {
     return (
@@ -135,9 +159,17 @@ export default function Dashboard() {
     );
   }
 
-  // keep your existing behaviour for now
-  if (!DEV_BYPASS_AUTH && status === 'unauthenticated') return null;
-
+  if (status === "unauthenticated") {
+    return (
+      <View style={[styles.centered, { backgroundColor: skin.background }]}>
+        <ActivityIndicator size="large" color={skin.accent} />
+        <Text style={{ color: skin.text, marginTop: 10 }}>
+          Redirecting to sign in…
+        </Text>
+      </View>
+    );
+  }
+  
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
