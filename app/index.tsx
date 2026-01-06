@@ -250,8 +250,18 @@ export default function Contexts() {
     router.push({ pathname: "/tasks", params: { personaId: String(personaId) } } as any);
   };
 
+  const handleOpenOverview = (personaId: number) => {
+    router.push({
+      pathname: "/persona/[personaId]",
+      params: { personaId: String(personaId) },
+    } as any);
+  };
+
   const handleEditPersona = (personaId: number) => {
-    router.push({ pathname: "/persona/[personaId]", params: { personaId: String(personaId) } } as any);
+    router.push({
+      pathname: "/persona/[personaId]/edit",
+      params: { personaId: String(personaId) },
+    } as any);
   };
 
   // ---- render gate (after hooks) ----
@@ -296,7 +306,7 @@ export default function Contexts() {
             decelerationRate="fast"
             bounces={false}
             onMomentumScrollEnd={handleMomentumEnd}
-            initialScrollIndex={visible.length > 1 ? 1 : 0}
+            initialScrollIndex={visible.length > 1 ? 1 : undefined}
             getItemLayout={(_, index) => ({
               length: SNAP,
               offset: SIDE + SNAP * index,
@@ -386,7 +396,11 @@ export default function Contexts() {
                 contentContainerStyle={{ paddingVertical: 6 }}
                 renderItem={({ item }) => (
                   <View style={[styles.personaRow, { borderColor: chromeSkin.muted ?? chromeSkin.text }]}>
-                    <TouchableOpacity style={{ flex: 1 }} onPress={() => handleEditPersona(item.id)}>
+
+                    <TouchableOpacity
+                      style={{ flex: 1 }}
+                      onPress={() => handleOpenOverview(item.id)}
+                    >
                       <Text style={{ color: chromeSkin.text, fontWeight: "800" }} numberOfLines={1}>
                         {item.display_name}
                       </Text>
@@ -395,8 +409,15 @@ export default function Contexts() {
                       </Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity onPress={() => handleViewTasks(item.id)} style={styles.personaIconBtn}>
-                      <Ionicons name="list-outline" size={22} color={chromeSkin.text} />
+                    <TouchableOpacity
+                      onPress={() => handleEditPersona(item.id)}
+                      style={styles.personaIconBtn}
+                    >
+                      <Ionicons
+                        name="create-outline"
+                        size={22}
+                        color={chromeSkin.text}
+                      />
                     </TouchableOpacity>
                   </View>
                 )}
