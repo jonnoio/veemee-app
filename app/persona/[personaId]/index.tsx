@@ -1,14 +1,15 @@
-// app/persona/[personaId]/overview.tsx
+// app/persona/[personaId]/index.tsx
+import { Ionicons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 import { API_BASE } from "@/config/api";
@@ -66,10 +67,18 @@ function fmtDue(iso: string | null) {
   }
 }
 
+function metaLine(due: string | null, mins: number | null) {
+  const bits: string[] = [];
+  if (due) bits.push(`due ${fmtDue(due)}`);
+  if (typeof mins === "number") bits.push(`${mins}m`);
+  return bits.length ? bits.join(" · ") : "";
+}
+
 export default function PersonaOverviewScreen() {
+
   const router = useRouter();
   const { personaId: raw } = useLocalSearchParams();
-  const personaId = Number(typeof raw === "string" ? raw : "");
+  const personaId = Number(Array.isArray(raw) ? raw[0] : raw);
   const { status } = useAuth();
 
   const { activeContext } = useContextStore();
@@ -119,10 +128,9 @@ export default function PersonaOverviewScreen() {
       const text = await res.text();
       const json = JSON.parse(text) as OverviewResponse;
       setData(json);
+      setOpenProjects({});
+      setOpenTasks({});
 
-      // default expand: open first project
-      const first = json?.overview?.projects?.[0];
-      if (first) setOpenProjects((p) => ({ ...p, [first.group_id]: true }));
     } catch (e: any) {
       setErr(e?.message || "Failed to load overview");
       setData(null);
@@ -184,60 +192,107 @@ export default function PersonaOverviewScreen() {
                 p.tasks?.reduce((sum, t) => sum + (t.actions?.length ?? 0), 0) ?? 0;
 
               return (
-                <View key={`p-${p.group_id}`} style={[styles.card, { backgroundColor: skin.surface }]}>
+                  <View
+                    key={`p-${p.group_id}`}
+                    style={[
+                      styles.projectCard,
+                      {
+                        backgroundColor: skin.surface,
+                        borderColor: skin.muted,
+                      },
+                    ]}
+                  >
                   {/* Project row */}
-                  <Pressable onPress={() => toggleProject(p.group_id)} style={styles.row}>
-                    <Text style={[styles.rowTitle, { color: skin.text }]} numberOfLines={1}>
-                      {isProjectOpen ? "▾ " : "▸ "}
-                      {p.name}
-                    </Text>
-                    <Text style={{ color: skin.muted, fontSize: 12 }}>
-                      {taskCount} tasks · {actionCount} actions
-                    </Text>
-                  </Pressable>
+                  <View style={[styles.projectHeaderRow]}>
+                    <View style={[styles.projectAccent, { backgroundColor: skin.accent }]} />
+                    {/* Left: expand/collapse */}
+                    <Pressable onPress={() => toggleProject(p.group_id)} style={styles.iconHit}>
+                      <Ionicons
+                        name={isProjectOpen ? "chevron-down" : "chevron-forward"}
+                        size={18}
+                        color={skin.text}
+                      />
+                    </Pressable>
 
-                  {/* Project actions */}
-                  <View style={styles.rowActions}>
-                    <Pressable style={[styles.pill, { borderColor: skin.muted }]}>
-                      <Text style={{ color: skin.text, fontSize: 12 }}>Edit</Text>
+                    {/* Middle: name = edit */}
+                    <Pressable
+                      onPress={() =>
+                        router.push({
+                          pathname: "/project/[projectId]/edit",
+                          params: { projectId: String(p.id ?? "") }, // or group_id if you need
+                        } as any)
+                      }
+                      style={{ flex: 1 }}
+                    >
+                      <Text style={[styles.projectTitle, { color: skin.text }]} numberOfLines={1}>
+                          {p.name}
+                      </Text>
+                      <Text style={{ color: skin.muted, fontSize: 12 }}>
+                        {taskCount} tasks · {actionCount} actions
+                      </Text>
                     </Pressable>
-                    <Pressable style={[styles.pill, { borderColor: skin.muted }]}>
-                      <Text style={{ color: skin.text, fontSize: 12 }}>Delete</Text>
-                    </Pressable>
+                    {/* Right: placeholder for future actions */}
                   </View>
 
                   {/* Tasks */}
                   {isProjectOpen &&
                     (p.tasks ?? []).map((t) => {
                       const isTaskOpen = !!openTasks[t.id];
-                      return (
-                        <View key={`t-${t.id}`} style={[styles.nested, { borderColor: skin.muted }]}>
-                          <Pressable onPress={() => toggleTask(t.id)} style={styles.row}>
-                            <Text style={[styles.rowTitle, { color: skin.text }]} numberOfLines={1}>
-                              {isTaskOpen ? "▾ " : "▸ "}
-                              {t.name}
-                            </Text>
-                            <Text style={{ color: skin.muted, fontSize: 12 }}>
-                              {t.status}
-                              {t.due_date ? ` · due ${fmtDue(t.due_date)}` : ""}
-                            </Text>
-                          </Pressable>
 
-                          <View style={styles.rowActions}>
-                            <Pressable style={[styles.pill, { borderColor: skin.muted }]}>
-                              <Text style={{ color: skin.text, fontSize: 12 }}>Done</Text>
+                      const nameStyle = [
+                        styles.taskTitle,
+                        { color: skin.text },
+                        t.deleted_at ? { textDecorationLine: "line-through", opacity: 0.45 } : null,
+                        t.is_archived ? { opacity: 0.65 } : null,
+                      ];
+
+                      return (
+                        <View
+                          key={`t-${t.id}`}
+                          style={[
+                            styles.taskBlock,
+                            { borderLeftColor: skin.muted, borderTopColor: skin.muted },
+                          ]}
+                        >
+                          <View style={styles.taskHeaderRow}>
+                            <Pressable onPress={() => toggleTask(t.id)} style={styles.iconHit}>
+                              <Ionicons
+                                name={isTaskOpen ? "chevron-down" : "chevron-forward"}
+                                size={18}
+                                color={skin.text}
+                              />
                             </Pressable>
-                            <Pressable style={[styles.pill, { borderColor: skin.muted }]}>
-                              <Text style={{ color: skin.text, fontSize: 12 }}>Timer</Text>
+
+                            <Pressable
+                              onPress={() =>
+                                router.push({
+                                  pathname: "/task/[taskId]/edit",
+                                  params: { taskId: String(t.id) },
+                                } as any)
+                              }
+                              style={{ flex: 1 }}
+                            >
+                              <Text style={nameStyle} numberOfLines={1}>
+                                {t.is_archived ? `(${t.name})` : t.name}
+                              </Text>
+                              {(() => {
+                                const meta = metaLine(t.due_date, t.estimated_minutes);
+                                return meta ? <Text style={{ color: skin.muted, fontSize: 12 }}>{meta}</Text> : null;
+                              })()}
                             </Pressable>
-                            <Pressable style={[styles.pill, { borderColor: skin.muted }]}>
-                              <Text style={{ color: skin.text, fontSize: 12 }}>Edit</Text>
+
+                            <Pressable onPress={() => console.log("timer task", t.id)} style={styles.iconHit}>
+                              <Ionicons name="timer-outline" size={18} color={skin.text} />
                             </Pressable>
-                            <Pressable style={[styles.pill, { borderColor: skin.muted }]}>
-                              <Text style={{ color: skin.text, fontSize: 12 }}>Delete</Text>
+
+                            <Pressable onPress={() => console.log("toggle done task", t.id)} style={styles.iconHit}>
+                              <Ionicons
+                                name={t.status === "done" ? "checkmark-circle" : "checkmark-circle-outline"}
+                                size={18}
+                                color={skin.text}
+                              />
                             </Pressable>
                           </View>
-
                           {isTaskOpen &&
                             (t.actions ?? []).map((a) => (
                               <View key={`a-${a.id}`} style={[styles.actionRow, { borderColor: skin.muted }]}>
@@ -245,18 +300,24 @@ export default function PersonaOverviewScreen() {
                                   <Text style={{ color: skin.text }} numberOfLines={2}>
                                     • {a.name}
                                   </Text>
-                                  <Text style={{ color: skin.muted, fontSize: 12 }}>
-                                    {a.status}
-                                    {a.due_date ? ` · due ${fmtDue(a.due_date)}` : ""}
-                                  </Text>
+                                  {(() => {
+                                    const meta = metaLine(a.due_date, a.estimated_minutes);
+                                    return meta ? (
+                                      <Text style={{ color: skin.muted, fontSize: 12 }}>{meta}</Text>
+                                    ) : null;
+                                  })()}
                                 </View>
 
-                                <View style={{ flexDirection: "row", gap: 8 }}>
-                                  <Pressable style={[styles.pill, { borderColor: skin.muted }]}>
-                                    <Text style={{ color: skin.text, fontSize: 12 }}>Done</Text>
+                                <View style={{ flexDirection: "row" }}>
+                                  <Pressable onPress={() => console.log("done action", a.id)} style={styles.iconHit}>
+                                    <Ionicons
+                                      name={a.status === "done" ? "checkmark-circle" : "checkmark-circle-outline"}
+                                      size={18}
+                                      color={skin.text}
+                                    />
                                   </Pressable>
-                                  <Pressable style={[styles.pill, { borderColor: skin.muted }]}>
-                                    <Text style={{ color: skin.text, fontSize: 12 }}>⏱</Text>
+                                  <Pressable onPress={() => console.log("timer action", a.id)} style={styles.iconHit}>
+                                    <Ionicons name="timer-outline" size={18} color={skin.text} />
                                   </Pressable>
                                 </View>
                               </View>
@@ -292,32 +353,7 @@ const styles = StyleSheet.create({
 
   content: { padding: 14, paddingBottom: 80, gap: 12 },
 
-  card: {
-    borderRadius: 16,
-    padding: 12,
-  },
-  row: { gap: 4 },
   rowTitle: { fontSize: 15, fontWeight: "900" },
-
-  rowActions: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 10,
-    marginBottom: 6,
-  },
-
-  pill: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-
-  nested: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-  },
 
   actionRow: {
     marginTop: 8,
@@ -326,5 +362,54 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     alignItems: "center",
+    marginLeft: 18, 
   },
+
+  iconHit: {
+    padding: 10,
+    borderRadius: 999,
+  },
+
+  projectHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minHeight: 44,
+  },
+
+  taskHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+  },
+
+  projectTitle: { fontSize: 14, fontWeight: "800" },
+  taskTitle: { fontSize: 14, fontWeight: "800" },
+  actionTitle: { fontSize: 14, fontWeight: "800" },
+  deleted: { textDecorationLine: "line-through", opacity: 0.45 },
+  archived: { opacity: 0.65 },
+
+  projectCard: {
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+  },
+
+  projectAccent: {
+    width: 4,
+    alignSelf: "stretch",
+    borderRadius: 999,
+    marginRight: 8,
+  },
+
+  taskBlock: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    marginLeft: 10,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+  },
+
 });
