@@ -92,6 +92,10 @@ export default function PersonaOverviewScreen() {
   const [openProjects, setOpenProjects] = useState<Record<number, boolean>>({});
   const [openTasks, setOpenTasks] = useState<Record<number, boolean>>({});
 
+  const [activeTimer, setActiveTimer] = useState<
+    { kind: "task"; id: number } | { kind: "action"; id: number } | null
+  >(null);
+
   const updateTaskInState = useCallback((taskId: number, patch: Partial<TaskRow>) => {
     setData((prev: OverviewResponse | null): OverviewResponse | null => {
       if (!prev) return null;
@@ -191,14 +195,18 @@ export default function PersonaOverviewScreen() {
         return;
       }
 
+      // optimistic: toggle this action highlight
+      setActiveTimer((prev) =>
+        prev?.kind === "action" && prev.id === action.id
+          ? null
+          : { kind: "action", id: action.id }
+      );
+
       try {
-        const res = await fetch(
-          `${API_BASE}/api/actions/${action.id}/toggle_timer`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        const res = await fetch(`${API_BASE}/api/actions/${action.id}/toggle_timer`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
         if (res.status === 401) {
           await SecureStore.deleteItemAsync("veemee-jwt");
@@ -207,19 +215,32 @@ export default function PersonaOverviewScreen() {
         }
 
         if (!res.ok) {
+          // revert optimistic on failure
+          setActiveTimer((prev) =>
+            prev?.kind === "action" && prev.id === action.id ? null : prev
+          );
           const msg = await res.text();
           console.log("toggleTimerAction failed", msg);
           return;
         }
 
         const json = await res.json();
-        // json.state is "running" or "stopped"
+        // expected: { state: "running"|"stopped", action_id, log_id, ... }
         console.log("action timer state:", json.state, "log:", json.log_id);
 
-        // Optional: you can show a quick toast/alert later.
-        // For now you can also trigger a refresh if you want:
-        // fetchOverview();
+        // server-truth (and mutually exclusive: if running, it's THE running timer)
+        if (json.state === "running") {
+          setActiveTimer({ kind: "action", id: action.id });
+        } else {
+          setActiveTimer((prev) =>
+            prev?.kind === "action" && prev.id === action.id ? null : prev
+          );
+        }
       } catch (e) {
+        // revert optimistic on error
+        setActiveTimer((prev) =>
+          prev?.kind === "action" && prev.id === action.id ? null : prev
+        );
         console.log(e);
       }
     },
@@ -276,6 +297,11 @@ export default function PersonaOverviewScreen() {
         return;
       }
 
+      // optional: optimistic UI (feel free to remove if you want only server-truth)
+      setActiveTimer((prev) =>
+        prev?.kind === "task" && prev.id === task.id ? null : { kind: "task", id: task.id }
+      );
+
       try {
         const res = await fetch(`${API_BASE}/api/tasks/${task.id}/toggle_timer`, {
           method: "POST",
@@ -289,6 +315,10 @@ export default function PersonaOverviewScreen() {
         }
 
         if (!res.ok) {
+          // revert optimistic UI on failure
+          setActiveTimer((prev) =>
+            prev?.kind === "task" && prev.id === task.id ? null : prev
+          );
           console.log("toggleTimerTask failed:", await res.text());
           return;
         }
@@ -297,13 +327,23 @@ export default function PersonaOverviewScreen() {
         // expected: { state: "running"|"stopped", task_id, log_id, ... }
         console.log("task timer:", json.state, "task:", task.id, "log:", json.log_id);
 
-        // Optional: if you want the overview to reflect timer changes immediately:
-        // fetchOverview();
+        // server-truth
+        if (json.state === "running") {
+          setActiveTimer({ kind: "task", id: task.id });
+        } else {
+          setActiveTimer((prev) =>
+            prev?.kind === "task" && prev.id === task.id ? null : prev
+          );
+        }
       } catch (e) {
+        // revert optimistic UI on error
+        setActiveTimer((prev) =>
+          prev?.kind === "task" && prev.id === task.id ? null : prev
+        );
         console.log(e);
       }
     },
-    [router] // add fetchOverview here too if you uncomment it above
+    [router]
   );
 
   const fetchOverview = useCallback(async () => {
@@ -490,7 +530,15 @@ export default function PersonaOverviewScreen() {
                             </Pressable>
 
                             <Pressable onPress={() => toggleTimerTask(t)} style={styles.iconHit}>
-                              <Ionicons name="timer-outline" size={18} color={skin.text} />
+                              <Ionicons
+                                name="timer-outline"
+                                size={18}
+                                color={
+                                  activeTimer?.kind === "task" && activeTimer.id === t.id
+                                    ? "green"
+                                    : skin.text
+                                }
+                              />
                             </Pressable>
 
                             <Pressable onPress={() => toggleDoneTask(t)} style={styles.iconHit}>
@@ -528,7 +576,15 @@ export default function PersonaOverviewScreen() {
                                 <View style={{ flexDirection: "row" }}>
 
                                   <Pressable onPress={() => toggleTimerAction(a)} style={styles.iconHit}>
-                                    <Ionicons name="timer-outline" size={18} color={skin.text} />
+                                    <Ionicons
+                                      name="timer-outline"
+                                      size={18}
+                                      color={
+                                        activeTimer?.kind === "action" && activeTimer.id === a.id
+                                          ? "green"
+                                          : skin.text
+                                      }
+                                    />
                                   </Pressable>
 
                                   <Pressable onPress={() => toggleDoneAction(a)} style={styles.iconHit}>
