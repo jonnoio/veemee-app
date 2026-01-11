@@ -18,13 +18,9 @@ export default function RootLayout() {
   return (
     <ContextStoreProvider>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack>
-          {/* index.tsx (now your Contexts screen) */}
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-
-          {/* keep dashboard only if you still navigate to it from persona selection etc */}
-          <Stack.Screen name="dashboard" options={{ headerShown: false }} />
-
+        <Stack  screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="dashboard"  />
           <Stack.Screen name="+not-found" />
         </Stack>
 

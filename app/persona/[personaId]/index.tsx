@@ -92,11 +92,219 @@ export default function PersonaOverviewScreen() {
   const [openProjects, setOpenProjects] = useState<Record<number, boolean>>({});
   const [openTasks, setOpenTasks] = useState<Record<number, boolean>>({});
 
+  const updateTaskInState = useCallback((taskId: number, patch: Partial<TaskRow>) => {
+    setData((prev: OverviewResponse | null): OverviewResponse | null => {
+      if (!prev) return null;
+
+      const nextProjects = prev.overview.projects.map((p) => ({
+        ...p,
+        tasks: (p.tasks ?? []).map((t) => (t.id === taskId ? { ...t, ...patch } : t)),
+      }));
+
+      return {
+        ...prev,
+        overview: {
+          ...prev.overview,
+          projects: nextProjects,
+        },
+      };
+    });
+  }, []);
+
+  const updateActionInState = useCallback((actionId: number, patch: Partial<ActionRow>) => {
+    setData((prev: OverviewResponse | null): OverviewResponse | null => {
+      if (!prev) return null;
+
+      const nextProjects = prev.overview.projects.map((p) => ({
+        ...p,
+        tasks: (p.tasks ?? []).map((t) => ({
+          ...t,
+          actions: (t.actions ?? []).map((a) => (a.id === actionId ? { ...a, ...patch } : a)),
+        })),
+      }));
+
+      return {
+        ...prev,
+        overview: {
+          ...prev.overview,
+          projects: nextProjects,
+        },
+      };
+    });
+  }, []);
+
   const toggleProject = (groupId: number) =>
     setOpenProjects((p) => ({ ...p, [groupId]: !p[groupId] }));
 
   const toggleTask = (taskId: number) =>
     setOpenTasks((p) => ({ ...p, [taskId]: !p[taskId] }));
+  
+  const toggleDoneAction = useCallback(
+    async (action: ActionRow) => {
+      const token = await SecureStore.getItemAsync("veemee-jwt");
+      if (!token) {
+        router.replace("/auth");
+        return;
+      }
+
+      // optimistic UI
+      const prevStatus = action.status;
+      const optimistic = prevStatus === "done" ? "todo" : "done";
+      updateActionInState(action.id, { status: optimistic as any });
+
+      try {
+        const res = await fetch(`${API_BASE}/api/actions/${action.id}/toggle`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.status === 401) {
+          await SecureStore.deleteItemAsync("veemee-jwt");
+          router.replace("/auth");
+          return;
+        }
+
+        if (!res.ok) {
+          // revert
+          updateActionInState(action.id, { status: prevStatus });
+          const msg = await res.text();
+          console.log("toggle action failed", msg);
+          return;
+        }
+
+        const json = (await res.json()) as { id: number; status: ActionRow["status"] };
+        updateActionInState(action.id, { status: json.status });
+      } catch (e) {
+        // revert
+        updateActionInState(action.id, { status: prevStatus });
+        console.log(e);
+      }
+    },
+    [router, updateActionInState]
+  );
+  
+  const toggleTimerAction = useCallback(
+    async (action: ActionRow) => {
+      const token = await SecureStore.getItemAsync("veemee-jwt");
+      if (!token) {
+        router.replace("/auth");
+        return;
+      }
+
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/actions/${action.id}/toggle_timer`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        if (res.status === 401) {
+          await SecureStore.deleteItemAsync("veemee-jwt");
+          router.replace("/auth");
+          return;
+        }
+
+        if (!res.ok) {
+          const msg = await res.text();
+          console.log("toggleTimerAction failed", msg);
+          return;
+        }
+
+        const json = await res.json();
+        // json.state is "running" or "stopped"
+        console.log("action timer state:", json.state, "log:", json.log_id);
+
+        // Optional: you can show a quick toast/alert later.
+        // For now you can also trigger a refresh if you want:
+        // fetchOverview();
+      } catch (e) {
+        console.log(e);
+      }
+    },
+    [router]
+  );
+
+  const toggleDoneTask = useCallback(
+    async (task: TaskRow) => {
+      const token = await SecureStore.getItemAsync("veemee-jwt");
+      if (!token) {
+        router.replace("/auth");
+        return;
+      }
+
+      const prevStatus = task.status;
+      const optimistic = prevStatus === "done" ? "todo" : "done";
+
+      // optimistic UI
+      updateTaskInState(task.id, { status: optimistic as any });
+
+      try {
+        const res = await fetch(`${API_BASE}/api/tasks/${task.id}/toggle`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.status === 401) {
+          await SecureStore.deleteItemAsync("veemee-jwt");
+          router.replace("/auth");
+          return;
+        }
+
+        if (!res.ok) {
+          updateTaskInState(task.id, { status: prevStatus });
+          console.log("toggleDoneTask failed:", await res.text());
+          return;
+        }
+
+        const json = (await res.json()) as { new_status: TaskRow["status"] };
+        updateTaskInState(task.id, { status: json.new_status as any });
+      } catch (e) {
+        updateTaskInState(task.id, { status: prevStatus });
+        console.log(e);
+      }
+    },
+    [router, updateTaskInState]
+  );
+
+  const toggleTimerTask = useCallback(
+    async (task: TaskRow) => {
+      const token = await SecureStore.getItemAsync("veemee-jwt");
+      if (!token) {
+        router.replace("/auth");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/tasks/${task.id}/toggle_timer`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.status === 401) {
+          await SecureStore.deleteItemAsync("veemee-jwt");
+          router.replace("/auth");
+          return;
+        }
+
+        if (!res.ok) {
+          console.log("toggleTimerTask failed:", await res.text());
+          return;
+        }
+
+        const json = await res.json();
+        // expected: { state: "running"|"stopped", task_id, log_id, ... }
+        console.log("task timer:", json.state, "task:", task.id, "log:", json.log_id);
+
+        // Optional: if you want the overview to reflect timer changes immediately:
+        // fetchOverview();
+      } catch (e) {
+        console.log(e);
+      }
+    },
+    [router] // add fetchOverview here too if you uncomment it above
+  );
 
   const fetchOverview = useCallback(async () => {
     if (!personaId || Number.isNaN(personaId)) {
@@ -281,12 +489,12 @@ export default function PersonaOverviewScreen() {
                               })()}
                             </Pressable>
 
-                            <Pressable onPress={() => console.log("timer task", t.id)} style={styles.iconHit}>
+                            <Pressable onPress={() => toggleTimerTask(t)} style={styles.iconHit}>
                               <Ionicons name="timer-outline" size={18} color={skin.text} />
                             </Pressable>
 
-                            <Pressable onPress={() => console.log("toggle done task", t.id)} style={styles.iconHit}>
-                              <Ionicons
+                            <Pressable onPress={() => toggleDoneTask(t)} style={styles.iconHit}>
+                                <Ionicons
                                 name={t.status === "done" ? "checkmark-circle" : "checkmark-circle-outline"}
                                 size={18}
                                 color={skin.text}
@@ -296,7 +504,16 @@ export default function PersonaOverviewScreen() {
                           {isTaskOpen &&
                             (t.actions ?? []).map((a) => (
                               <View key={`a-${a.id}`} style={[styles.actionRow, { borderColor: skin.muted }]}>
-                                <View style={{ flex: 1 }}>
+
+                                <Pressable
+                                  onPress={() =>
+                                    router.push({
+                                      pathname: "/action/[actionId]/edit",
+                                      params: { actionId: String(a.id) },
+                                    } as any)
+                                  }
+                                  style={{ flex: 1 }}
+                                >
                                   <Text style={{ color: skin.text }} numberOfLines={2}>
                                     • {a.name}
                                   </Text>
@@ -306,19 +523,22 @@ export default function PersonaOverviewScreen() {
                                       <Text style={{ color: skin.muted, fontSize: 12 }}>{meta}</Text>
                                     ) : null;
                                   })()}
-                                </View>
+                                </Pressable>
 
                                 <View style={{ flexDirection: "row" }}>
-                                  <Pressable onPress={() => console.log("done action", a.id)} style={styles.iconHit}>
+
+                                  <Pressable onPress={() => toggleTimerAction(a)} style={styles.iconHit}>
+                                    <Ionicons name="timer-outline" size={18} color={skin.text} />
+                                  </Pressable>
+
+                                  <Pressable onPress={() => toggleDoneAction(a)} style={styles.iconHit}>
                                     <Ionicons
                                       name={a.status === "done" ? "checkmark-circle" : "checkmark-circle-outline"}
                                       size={18}
                                       color={skin.text}
                                     />
                                   </Pressable>
-                                  <Pressable onPress={() => console.log("timer action", a.id)} style={styles.iconHit}>
-                                    <Ionicons name="timer-outline" size={18} color={skin.text} />
-                                  </Pressable>
+
                                 </View>
                               </View>
                             ))}

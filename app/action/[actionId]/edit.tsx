@@ -1,4 +1,4 @@
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -13,31 +13,30 @@ import {
 
 import { API_BASE } from "@/config/api";
 
-type Task = {
+type Action = {
   id: number;
-  persona_id: number;
-  task_text: string;
+  task_id: number;
+  name: string;
   status: "todo" | "done" | string;
   due_date?: string | null; // ISO, edit as YYYY-MM-DD
-  category?: string | null;
-
-  originator?: string | null;
-  contact?: string | null;
-  notes?: string | null;
-  project_url?: string | null;
-  files_url?: string | null;
-
-  project_id?: number | null;
   estimated_minutes?: number | null;
 
-  parent_task_id?: number | null;
+  recurrence?: string | null;
+  recurrence_days?: string | null; // assuming text/CSV
+  recurrence_dom?: number | null;
+  recurrence_interval?: number | null;
+  notes?: string | null;
 };
 
-type GetTaskResponse = { task: Task };
-type SaveTaskResponse = { task: Task };
+type GetActionResponse = { action: Action };
+type SaveActionResponse = { action: Action };
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <Text style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{children}</Text>;
+  return (
+    <Text style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
+      {children}
+    </Text>
+  );
 }
 
 function Input(props: React.ComponentProps<typeof TextInput>) {
@@ -45,7 +44,12 @@ function Input(props: React.ComponentProps<typeof TextInput>) {
     <TextInput
       {...props}
       style={[
-        { borderWidth: 1, borderRadius: 12, padding: 12, fontSize: 16 },
+        {
+          borderWidth: 1,
+          borderRadius: 12,
+          padding: 12,
+          fontSize: 16,
+        },
         props.style,
       ]}
     />
@@ -88,69 +92,61 @@ function normInt(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export default function EditTask() {
-  const { taskId } = useLocalSearchParams<{ taskId: string }>();
-  const id = useMemo(() => Number(taskId), [taskId]);
+export default function EditAction() {
+  const { actionId } = useLocalSearchParams<{ actionId: string }>();
+  const id = useMemo(() => Number(actionId), [actionId]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [original, setOriginal] = useState<Task | null>(null);
+  const [original, setOriginal] = useState<Action | null>(null);
 
-  // Form state (strings for inputs)
-  const [taskText, setTaskText] = useState("");
+  // Form state
+  const [name, setName] = useState("");
   const [status, setStatus] = useState<string>("todo");
   const [dueDate, setDueDate] = useState(""); // YYYY-MM-DD
-  const [category, setCategory] = useState("");
-
-  const [originator, setOriginator] = useState("");
-  const [contact, setContact] = useState("");
-  const [notes, setNotes] = useState("");
-  const [projectUrl, setProjectUrl] = useState("");
-  const [filesUrl, setFilesUrl] = useState("");
-
-  const [projectId, setProjectId] = useState(""); // numeric string
   const [estimatedMinutes, setEstimatedMinutes] = useState(""); // numeric string
-  const [parentTaskId, setParentTaskId] = useState(""); // numeric string
+
+  const [recurrence, setRecurrence] = useState("");
+  const [recurrenceDays, setRecurrenceDays] = useState("");
+  const [recurrenceDom, setRecurrenceDom] = useState(""); // numeric string
+  const [recurrenceInterval, setRecurrenceInterval] = useState(""); // numeric string
+  const [notes, setNotes] = useState("");
 
   const dirty = useMemo(() => {
     if (!original) return false;
 
     const origDue = (original.due_date ?? "").slice(0, 10);
-    const origProjectId = original.project_id == null ? "" : String(original.project_id);
     const origEst = original.estimated_minutes == null ? "" : String(original.estimated_minutes);
-    const origParent = original.parent_task_id == null ? "" : String(original.parent_task_id);
+    const origDom = original.recurrence_dom == null ? "" : String(original.recurrence_dom);
+    const origInt = original.recurrence_interval == null ? "" : String(original.recurrence_interval);
 
     return (
-      taskText !== (original.task_text ?? "") ||
+      name !== (original.name ?? "") ||
       status !== (original.status ?? "todo") ||
       dueDate !== origDue ||
-      category !== (original.category ?? "") ||
-      originator !== (original.originator ?? "") ||
-      contact !== (original.contact ?? "") ||
-      notes !== (original.notes ?? "") ||
-      projectUrl !== (original.project_url ?? "") ||
-      filesUrl !== (original.files_url ?? "") ||
-      projectId !== origProjectId ||
       estimatedMinutes !== origEst ||
-      parentTaskId !== origParent
+      recurrence !== (original.recurrence ?? "") ||
+      recurrenceDays !== (original.recurrence_days ?? "") ||
+      recurrenceDom !== origDom ||
+      recurrenceInterval !== origInt ||
+      notes !== (original.notes ?? "")
     );
   }, [
     original,
-    taskText,
+    name,
     status,
     dueDate,
-    category,
-    originator,
-    contact,
-    notes,
-    projectUrl,
-    filesUrl,
-    projectId,
     estimatedMinutes,
-    parentTaskId,
+    recurrence,
+    recurrenceDays,
+    recurrenceDom,
+    recurrenceInterval,
+    notes,
   ]);
+
+  const router = useRouter();
 
   useEffect(() => {
     let alive = true;
@@ -160,7 +156,7 @@ export default function EditTask() {
       setError(null);
 
       if (!Number.isFinite(id) || id <= 0) {
-        setError("Invalid taskId");
+        setError("Invalid actionId");
         setLoading(false);
         return;
       }
@@ -172,11 +168,9 @@ export default function EditTask() {
       }
 
       try {
-        const res = await fetch(`${API_BASE}/api/task/${id}`, {
+        const res = await fetch(`${API_BASE}/api/action/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-
-        if (!alive) return;
 
         if (res.status === 401) {
           await SecureStore.deleteItemAsync("veemee-jwt");
@@ -185,36 +179,30 @@ export default function EditTask() {
         }
 
         if (!res.ok) {
-          const msg = await res.text();
-          setError(msg || "Failed to load task");
+          setError(await res.text());
           setLoading(false);
           return;
         }
 
-        const json = (await res.json()) as { task: any };
-        const t = json.task as any;
+        const json = (await res.json()) as { action: Action };
+        if (!alive) return;
 
-        setOriginal(t);
+        const a = json.action;
+        setOriginal(a);
 
-        setTaskText(t.task_text ?? "");
-        setStatus(t.status ?? "todo");
-        setDueDate((t.due_date ?? "").slice(0, 10));
-        setCategory(t.category ?? "");
-
-        setOriginator(t.originator ?? "");
-        setContact(t.contact ?? "");
-        setNotes(t.notes ?? "");
-        setProjectUrl(t.project_url ?? "");
-        setFilesUrl(t.files_url ?? "");
-
-        setProjectId(t.project_id == null ? "" : String(t.project_id));
-        setEstimatedMinutes(t.estimated_minutes == null ? "" : String(t.estimated_minutes));
-        setParentTaskId(t.parent_task_id == null ? "" : String(t.parent_task_id));
+        setName(a.name ?? "");
+        setStatus(a.status ?? "todo");
+        setDueDate((a.due_date ?? "").slice(0, 10));
+        setEstimatedMinutes(a.estimated_minutes == null ? "" : String(a.estimated_minutes));
+        setRecurrence(a.recurrence ?? "");
+        setRecurrenceDays(a.recurrence_days ?? "");
+        setRecurrenceDom(a.recurrence_dom == null ? "" : String(a.recurrence_dom));
+        setRecurrenceInterval(a.recurrence_interval == null ? "" : String(a.recurrence_interval));
+        setNotes(a.notes ?? "");
 
         setLoading(false);
       } catch (e: any) {
-        if (!alive) return;
-        setError(e?.message || "Failed to load task");
+        setError(e?.message || "Failed to load action");
         setLoading(false);
       }
     }
@@ -225,31 +213,29 @@ export default function EditTask() {
     };
   }, [id, router]);
 
-  function buildPatch(orig: Task) {
+  function buildPatch(orig: Action) {
     const patch: Record<string, any> = {};
 
     const origDue = (orig.due_date ?? "").slice(0, 10);
     const curDue = dueDate.trim();
 
-    if (taskText !== (orig.task_text ?? "")) patch.task_text = taskText.trim();
+    if (name !== (orig.name ?? "")) patch.name = name.trim();
     if (status !== (orig.status ?? "todo")) patch.status = status.trim() || "todo";
     if (curDue !== origDue) patch.due_date = normText(curDue);
-
-    if (category !== (orig.category ?? "")) patch.category = normText(category);
-    if (originator !== (orig.originator ?? "")) patch.originator = normText(originator);
-    if (contact !== (orig.contact ?? "")) patch.contact = normText(contact);
-    if (notes !== (orig.notes ?? "")) patch.notes = normText(notes);
-    if (projectUrl !== (orig.project_url ?? "")) patch.project_url = normText(projectUrl);
-    if (filesUrl !== (orig.files_url ?? "")) patch.files_url = normText(filesUrl);
-
-    const curPid = normInt(projectId);
-    if (curPid !== (orig.project_id ?? null)) patch.project_id = curPid;
 
     const curEst = normInt(estimatedMinutes);
     if (curEst !== (orig.estimated_minutes ?? null)) patch.estimated_minutes = curEst;
 
-    const curParent = normInt(parentTaskId);
-    if (curParent !== (orig.parent_task_id ?? null)) patch.parent_task_id = curParent;
+    if (recurrence !== (orig.recurrence ?? "")) patch.recurrence = normText(recurrence);
+    if (recurrenceDays !== (orig.recurrence_days ?? "")) patch.recurrence_days = normText(recurrenceDays);
+
+    const curDom = normInt(recurrenceDom);
+    if (curDom !== (orig.recurrence_dom ?? null)) patch.recurrence_dom = curDom;
+
+    const curInt = normInt(recurrenceInterval);
+    if (curInt !== (orig.recurrence_interval ?? null)) patch.recurrence_interval = curInt;
+
+    if (notes !== (orig.notes ?? "")) patch.notes = normText(notes);
 
     return patch;
   }
@@ -257,8 +243,8 @@ export default function EditTask() {
   async function onSave() {
     if (!original) return;
 
-    if (!taskText.trim()) {
-      Alert.alert("Task text is required");
+    if (!name.trim()) {
+      Alert.alert("Action name is required");
       return;
     }
 
@@ -279,13 +265,12 @@ export default function EditTask() {
 
     const token = await SecureStore.getItemAsync("veemee-jwt");
     if (!token) {
-      setSaving(false);
       router.replace("/auth");
       return;
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/task/${id}`, {
+      const res = await fetch(`${API_BASE}/api/actions/${id}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -296,35 +281,33 @@ export default function EditTask() {
 
       if (res.status === 401) {
         await SecureStore.deleteItemAsync("veemee-jwt");
-        setSaving(false);
         router.replace("/auth");
         return;
       }
 
       if (!res.ok) {
-        const msg = await res.text();
+        setError(await res.text());
         setSaving(false);
-        setError(msg || "Failed to save task");
         return;
       }
 
-      const json = (await res.json()) as { task: any };
-      setOriginal(json.task);
-      setSaving(false);
+      const json = (await res.json()) as { action: Action };
+      setOriginal(json.action);
 
+      setSaving(false);
       Alert.alert("Saved");
       router.back();
     } catch (e: any) {
       setSaving(false);
-      setError(e?.message || "Failed to save task");
+      setError(e?.message || "Failed to save action");
     }
   }
 
-return (
+  return (
     <View style={{ flex: 1 }}>
       <Stack.Screen
         options={{
-          title: "Edit Task",
+          title: "Edit Action",
           headerShown: false,
           headerRight: () => (
             <Pressable
@@ -353,14 +336,8 @@ return (
           ) : null}
 
           <View style={{ gap: 8 }}>
-            <FieldLabel>Task</FieldLabel>
-            <Input
-              value={taskText}
-              onChangeText={setTaskText}
-              placeholder="What needs doing?"
-              multiline
-              style={{ minHeight: 90, textAlignVertical: "top" }}
-            />
+            <FieldLabel>Name</FieldLabel>
+            <Input value={name} onChangeText={setName} placeholder="Action name" />
           </View>
 
           <View style={{ gap: 8 }}>
@@ -377,48 +354,64 @@ return (
           </View>
 
           <View style={{ gap: 8 }}>
-            <FieldLabel>Category</FieldLabel>
-            <Input value={category} onChangeText={setCategory} placeholder="Optional" />
+            <FieldLabel>Estimated minutes</FieldLabel>
+            <Input
+              value={estimatedMinutes}
+              onChangeText={setEstimatedMinutes}
+              placeholder="Optional (number)"
+              keyboardType="number-pad"
+            />
           </View>
 
           <View style={{ gap: 8 }}>
-            <FieldLabel>Originator</FieldLabel>
-            <Input value={originator} onChangeText={setOriginator} placeholder="Optional" />
+            <FieldLabel>Recurrence</FieldLabel>
+            <Input
+              value={recurrence}
+              onChangeText={setRecurrence}
+              placeholder="e.g. daily / weekly / monthly"
+              autoCapitalize="none"
+            />
           </View>
 
           <View style={{ gap: 8 }}>
-            <FieldLabel>Contact</FieldLabel>
-            <Input value={contact} onChangeText={setContact} placeholder="Optional" />
+            <FieldLabel>Recurrence days</FieldLabel>
+            <Input
+              value={recurrenceDays}
+              onChangeText={setRecurrenceDays}
+              placeholder='e.g. "1,3,5" (Mon/Wed/Fri)'
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={{ gap: 8 }}>
+            <FieldLabel>Recurrence day-of-month</FieldLabel>
+            <Input
+              value={recurrenceDom}
+              onChangeText={setRecurrenceDom}
+              placeholder="Optional (number)"
+              keyboardType="number-pad"
+            />
+          </View>
+
+          <View style={{ gap: 8 }}>
+            <FieldLabel>Recurrence interval</FieldLabel>
+            <Input
+              value={recurrenceInterval}
+              onChangeText={setRecurrenceInterval}
+              placeholder="Optional (number)"
+              keyboardType="number-pad"
+            />
           </View>
 
           <View style={{ gap: 8 }}>
             <FieldLabel>Notes</FieldLabel>
-            <Input value={notes} onChangeText={setNotes} placeholder="Optional" multiline style={{ minHeight: 110, textAlignVertical: "top" }} />
-          </View>
-
-          <View style={{ gap: 8 }}>
-            <FieldLabel>Project URL</FieldLabel>
-            <Input value={projectUrl} onChangeText={setProjectUrl} placeholder="https://…" autoCapitalize="none" />
-          </View>
-
-          <View style={{ gap: 8 }}>
-            <FieldLabel>Files URL</FieldLabel>
-            <Input value={filesUrl} onChangeText={setFilesUrl} placeholder="https://…" autoCapitalize="none" />
-          </View>
-
-          <View style={{ gap: 8 }}>
-            <FieldLabel>Project ID</FieldLabel>
-            <Input value={projectId} onChangeText={setProjectId} placeholder="Optional (number)" keyboardType="number-pad" />
-          </View>
-
-          <View style={{ gap: 8 }}>
-            <FieldLabel>Estimated minutes</FieldLabel>
-            <Input value={estimatedMinutes} onChangeText={setEstimatedMinutes} placeholder="Optional (number)" keyboardType="number-pad" />
-          </View>
-
-          <View style={{ gap: 8 }}>
-            <FieldLabel>Parent task ID</FieldLabel>
-            <Input value={parentTaskId} onChangeText={setParentTaskId} placeholder="Optional (number)" keyboardType="number-pad" />
+            <Input
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="Optional"
+              multiline
+              style={{ minHeight: 110, textAlignVertical: "top" }}
+            />
           </View>
 
           <Pressable
